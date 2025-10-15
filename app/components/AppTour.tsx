@@ -37,7 +37,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
           title: '➕ Add Local Firmware',
           description: 'Upload firmware .bin files from your computer. They will be saved in browser storage for future use.',
           side: 'left' as const,
-          align: 'center' as const,
+          align: 'start' as const,
         },
       },
       {
@@ -46,7 +46,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
           title: '🐙 Get from GitHub',
           description: 'Download the latest firmware releases directly from the GitHub repository.',
           side: 'left' as const,
-          align: 'center' as const,
+          align: 'start' as const,
         },
       },
       {
@@ -80,8 +80,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.local-firmwares-section',
         popover: {
           title: '💾 Local Storage',
-          description: 'Manage your downloaded and uploaded firmwares. They persist between browser sessions.',
-          side: 'left' as const,
+          description: 'Manage your downloaded and uploaded firmwares. You can load your downloaded firmware for flashing. They persist between browser sessions.',          side: 'left' as const,
           align: 'start' as const,
         },
       },
