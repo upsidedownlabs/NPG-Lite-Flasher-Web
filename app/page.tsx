@@ -227,13 +227,13 @@ export default function ESP32Flasher() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      const el = target instanceof Element ? target : (target as any).parentElement ?? null;
+      const el = target instanceof Element ? target : (target as Node).parentElement;
 
       if (
         showAdvanced &&
         advancedButtonRef.current &&
         !advancedButtonRef.current.contains(target) &&
-        !(el && el.closest('.advanced-popup'))
+        !(el instanceof Element && el.closest('.advanced-popup'))
       ) {
         setShowAdvanced(false);
       }
@@ -244,16 +244,17 @@ export default function ESP32Flasher() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showAdvanced]);
-
   const connectToDevice = async () => {
     try {
       // Check for Web Serial API support
-      if (!('serial' in navigator) || !(navigator as any).serial?.requestPort) {
+      const navigatorWithSerial = navigator as Navigator & { serial?: Serial };
+      if (!navigatorWithSerial.serial || typeof navigatorWithSerial.serial.requestPort !== 'function') {
         addLog('❌ Web Serial API not supported. Use Chrome/Edge 89+ over HTTPS.');
         return;
       }
+
       addLog('Requesting serial port access...');
-      const port = await navigator.serial.requestPort();
+      const port = await navigatorWithSerial.serial.requestPort();
       addLog('Connecting to ESP32...');
 
       serialPortRef.current = port;
