@@ -449,8 +449,8 @@ export default function ESP32Flasher() {
       addLog('   3. 🔵  Device will start with new firmware');
       addLog('');
       addLog('💡 Troubleshooting:');
-      addLog('   • If device doesn&apos;t respond: Power cycle USB');
-      addLog('   • To flash again: Click &quot;Connect Device&quot;');
+      addLog("   • If device doesn't respond: Power cycle USB");
+      addLog('   • To flash again: Click "Connect Device"');
       addLog('   • Check device in Bluetooth settings');
 
     } catch (error: unknown) {
@@ -557,7 +557,7 @@ export default function ESP32Flasher() {
       addLog('\n💡 You can still flash firmware by:');
       addLog('1. Downloading .bin files manually from GitHub');
       addLog(`2. Visit: https://github.com/${githubRepo}/releases`);
-      addLog('3. Use &quot;Add Firmware&quot; button to upload them');
+      addLog('3. Use "Add Firmware" button to upload them');
     } finally {
       setIsFetchingGithub(false);
     }
@@ -621,16 +621,16 @@ export default function ESP32Flasher() {
       setFirmwareFile(file);
       setShowGithubDialog(false);
       addLog(`✓ Successfully downloaded and saved ${name}`);
-      addLog(`✓ Ready to flash! Click &quot;Flash Firmware&quot; when device is connected.`);
+      addLog(`✓ Ready to flash! Click "Flash Firmware" when device is connected.`);
 
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       addLog(`❌ Download error: ${errorMsg}`);
       addLog(`\n🚀 Manual Download Instructions:`);
       addLog(`   1. Visit: https://github.com/${githubRepo}/releases/latest`);
-      addLog(`   2. Find and click on &quot;${name}&quot;`);
+      addLog(`   2. Find and click on "${name}"`);
       addLog(`   3. Save the .bin file to your computer`);
-      addLog(`   4. Use &quot;Add Firmware&quot; button to upload it`);
+      addLog(`   4. Use "Add Firmware" button to upload it`);
     } finally {
       setDownloadingFirmware(null);
       setDownloadProgress('');
