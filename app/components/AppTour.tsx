@@ -1,7 +1,6 @@
 // components/AppTour.tsx
 'use client';
 import { driver, type DriveStep, type Driver } from 'driver.js';
-import 'driver.js/dist/driver.css';
 import { useEffect, useRef } from 'react';
 
 interface AppTourProps {

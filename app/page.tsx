@@ -226,10 +226,15 @@ export default function ESP32Flasher() {
   // Close advanced popup when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (showAdvanced &&
+      const target = event.target as Node;
+      const el = target instanceof Element ? target : (target as any).parentElement ?? null;
+
+      if (
+        showAdvanced &&
         advancedButtonRef.current &&
-        !advancedButtonRef.current.contains(event.target as Node) &&
-        !(event.target as Element).closest('.advanced-popup')) {
+        !advancedButtonRef.current.contains(target) &&
+        !(el && el.closest('.advanced-popup'))
+      ) {
         setShowAdvanced(false);
       }
     };
@@ -242,6 +247,11 @@ export default function ESP32Flasher() {
 
   const connectToDevice = async () => {
     try {
+      // Check for Web Serial API support
+      if (!('serial' in navigator) || !(navigator as any).serial?.requestPort) {
+        addLog('❌ Web Serial API not supported. Use Chrome/Edge 89+ over HTTPS.');
+        return;
+      }
       addLog('Requesting serial port access...');
       const port = await navigator.serial.requestPort();
       addLog('Connecting to ESP32...');
@@ -339,7 +349,13 @@ export default function ESP32Flasher() {
       addLog('No device connected or no firmware file selected');
       return;
     }
-
+    const addrStr = flashAddress.trim();
+    const isValidAddr = /^0x[0-9a-fA-F]+$/.test(addrStr);
+    if (!isValidAddr) {
+      addLog('❌ Invalid flash address. Use hex like 0x10000');
+      return;
+    }
+    const address = parseInt(addrStr, 16);
     try {
       setIsFlashing(true);
       setProgress(0);
@@ -351,7 +367,7 @@ export default function ESP32Flasher() {
 
       const fileArray = [{
         data: Array.from(new Uint8Array(arrayBuffer)).map(b => String.fromCharCode(b)).join(''),
-        address: parseInt(flashAddress, 16)
+        address: address
       }];
 
       addLog(`Writing firmware to address ${flashAddress}...`);
@@ -836,122 +852,122 @@ export default function ESP32Flasher() {
               )}
             </div>
           </div>
-                  {/* Console Section - Middle */}
-        <div className="console-section w-full lg:w-70 xl:w-100 2xl:w-150 flex-shrink-0">
-          <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 h-full flex flex-col">
-            {/* Console Logs */}
-            <div className="flex-1 min-h-0 flex flex-col">
-              <div className="flex justify-between items-center mb-3">
-                <h2 className="text-lg font-semibold text-white">Console</h2>
-                <button
-                  onClick={clearLogs}
-                  className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
-                >
-                  Clear
-                </button>
-              </div>
-              <div className="bg-black rounded-lg p-3 flex-1 overflow-y-auto font-mono text-sm min-h-0">
-                {logs.map((log, index) => (
-                  <div
-                    key={index}
-                    ref={index === logs.length - 1 ? lastLogRef : null}
-                    className="text-green-400 mb-1 leading-relaxed"
-                  >
-                    {log}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Firmware Sidebar - Right Side */}
-        <div className="local-firmwares-section w-full lg:w-80 flex-shrink-0">
-          <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 h-full flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold text-white">Local Firmwares</h2>
-              <div className="flex gap-2">
-                <span className="px-2 py-1 bg-blue-600 text-white rounded text-xs">
-                  {localFirmwares.length}
-                </span>
-                {localFirmwares.length > 0 && (
+          {/* Console Section - Middle */}
+          <div className="console-section w-full lg:w-70 xl:w-100 2xl:w-150 flex-shrink-0">
+            <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 h-full flex flex-col">
+              {/* Console Logs */}
+              <div className="flex-1 min-h-0 flex flex-col">
+                <div className="flex justify-between items-center mb-3">
+                  <h2 className="text-lg font-semibold text-white">Console</h2>
                   <button
-                    onClick={clearAllFirmwares}
-                    className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
-                    title="Clear All"
+                    onClick={clearLogs}
+                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm transition-colors"
                   >
-                    🗑️
+                    Clear
                   </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto">
-              {localFirmwares.length === 0 ? (
-                <div className="text-center py-8">
-                  <svg className="h-12 w-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <p className="text-gray-400 text-sm">No firmwares stored locally.</p>
-                  <p className="text-gray-500 text-xs mt-1">Download from GitHub or add local files to store them here.</p>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {localFirmwares.map((firmware, index) => (
+                <div className="bg-black rounded-lg p-3 flex-1 overflow-y-auto font-mono text-sm min-h-0">
+                  {logs.map((log, index) => (
                     <div
                       key={index}
-                      className={`border rounded-lg p-3 transition-colors ${firmwareFile?.name === firmware.name
-                        ? 'border-green-500 bg-green-900 bg-opacity-20'
-                        : 'border-gray-600 hover:bg-gray-700'
-                        }`}
+                      ref={index === logs.length - 1 ? lastLogRef : null}
+                      className="text-green-400 mb-1 leading-relaxed"
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-white font-medium text-sm truncate">{firmware.name}</p>
-                          <div className="flex justify-between mt-1 text-xs text-gray-400">
-                            <span>{(firmware.size / 1024).toFixed(1)} KB</span>
-                            <span>{new Date(firmware.timestamp).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => loadFirmwareFromStorage(firmware.name)}
-                          className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
-                        >
-                          Load
-                        </button>
-                        <button
-                          onClick={() => deleteFirmwareFromStorage(firmware.name)}
-                          className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {log}
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-
-            {/* Quick Info */}
-            <div className="mt-4 pt-4 border-t border-gray-700">
-              <div className="space-y-2 text-xs text-gray-300">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span>Loaded firmware ready</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span>Firmware in storage</span>
-                </div>
-                <p className="text-gray-400 text-xs mt-2">
-                  Firmwares are stored in your browser and persist between sessions.
-                </p>
               </div>
             </div>
           </div>
-        </div>
+
+          {/* Firmware Sidebar - Right Side */}
+          <div className="local-firmwares-section w-full lg:w-80 flex-shrink-0">
+            <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 h-full flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-white">Local Firmwares</h2>
+                <div className="flex gap-2">
+                  <span className="px-2 py-1 bg-blue-600 text-white rounded text-xs">
+                    {localFirmwares.length}
+                  </span>
+                  {localFirmwares.length > 0 && (
+                    <button
+                      onClick={clearAllFirmwares}
+                      className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                      title="Clear All"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                {localFirmwares.length === 0 ? (
+                  <div className="text-center py-8">
+                    <svg className="h-12 w-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <p className="text-gray-400 text-sm">No firmwares stored locally.</p>
+                    <p className="text-gray-500 text-xs mt-1">Download from GitHub or add local files to store them here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {localFirmwares.map((firmware, index) => (
+                      <div
+                        key={index}
+                        className={`border rounded-lg p-3 transition-colors ${firmwareFile?.name === firmware.name
+                          ? 'border-green-500 bg-green-900 bg-opacity-20'
+                          : 'border-gray-600 hover:bg-gray-700'
+                          }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium text-sm truncate">{firmware.name}</p>
+                            <div className="flex justify-between mt-1 text-xs text-gray-400">
+                              <span>{(firmware.size / 1024).toFixed(1)} KB</span>
+                              <span>{new Date(firmware.timestamp).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => loadFirmwareFromStorage(firmware.name)}
+                            className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
+                          >
+                            Load
+                          </button>
+                          <button
+                            onClick={() => deleteFirmwareFromStorage(firmware.name)}
+                            className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Info */}
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="space-y-2 text-xs text-gray-300">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span>Loaded firmware ready</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span>Firmware in storage</span>
+                  </div>
+                  <p className="text-gray-400 text-xs mt-2">
+                    Firmwares are stored in your browser and persist between sessions.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
