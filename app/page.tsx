@@ -3,11 +3,41 @@
 import { useState, useRef, useEffect } from 'react';
 import { ESPLoader, Transport } from 'esptool-js';
 import { AppTour } from './components/AppTour';
+import { Bluetooth, Wifi, Usb, Loader2 } from 'lucide-react';
 
 // IndexedDB utility functions
 const DB_NAME = 'ESP32FlasherDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'firmwares';
+
+// Default firmware files
+interface DefaultFirmware {
+  name: string;
+  description: string;
+  url: string;
+  type: 'ble' | 'wifi' | 'serial';
+}
+
+const DEFAULT_FIRMWARES: DefaultFirmware[] = [
+  {
+    name: 'npg-lite-ble.bin',
+    description: 'BLE Version - For Bluetooth Low Energy communication',
+    url: './firmwares/NPG-LITE-BLE.ino.bin',
+    type: 'ble'
+  },
+  {
+    name: 'npg-lite-wifi.bin',
+    description: 'WiFi Version - For WiFi communication',
+    url: './firmwares/NPG-LITE-WiFi.ino.bin',
+    type: 'wifi'
+  },
+  {
+    name: 'npg-lite-serial.bin',
+    description: 'Serial Version - For direct serial communication',
+    url: './firmwares/NPG-LITE.ino.bin',
+    type: 'serial'
+  }
+];
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -28,12 +58,13 @@ const openDB = (): Promise<IDBDatabase> => {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'name' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('size', 'size', { unique: false });
+        store.createIndex('type', 'type', { unique: false });
       }
     };
   });
 };
 
-const saveFirmwareToDB = async (name: string, data: ArrayBuffer): Promise<void> => {
+const saveFirmwareToDB = async (name: string, data: ArrayBuffer, type?: string): Promise<void> => {
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -44,7 +75,8 @@ const saveFirmwareToDB = async (name: string, data: ArrayBuffer): Promise<void> 
         name,
         data,
         timestamp: Date.now(),
-        size: data.byteLength
+        size: data.byteLength,
+        ...(type && { type })
       };
 
       const request = store.put(firmware);
@@ -65,7 +97,8 @@ const saveFirmwareToDB = async (name: string, data: ArrayBuffer): Promise<void> 
           name,
           data,
           timestamp: Date.now(),
-          size: data.byteLength
+          size: data.byteLength,
+          ...(type && { type })
         };
 
         const request = store.put(firmware);
@@ -112,6 +145,8 @@ interface FirmwareInfo {
   name: string;
   size: number;
   timestamp: number;
+  type?: string;
+  isDefault?: boolean;
 }
 
 const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
@@ -123,11 +158,22 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
     const request = store.getAll();
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
-      const firmwares = request.result.map((item: FirmwareInfo & { data: ArrayBuffer }) => ({
+      const items = request.result as Array<{
+        name: string;
+        size: number;
+        timestamp: number;
+        type?: string;
+        data: ArrayBuffer;
+      }>;
+      
+      const firmwares: FirmwareInfo[] = items.map(item => ({
         name: item.name,
         size: item.size,
-        timestamp: item.timestamp
+        timestamp: item.timestamp,
+        type: item.type,
+        isDefault: item.type && ['ble', 'wifi', 'serial'].includes(item.type) ? true : undefined
       }));
+      
       resolve(firmwares);
     };
   });
@@ -180,6 +226,8 @@ export default function ESP32Flasher() {
   const [downloadingFirmware, setDownloadingFirmware] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<string>('');
   const [localFirmwares, setLocalFirmwares] = useState<FirmwareInfo[]>([]);
+  const [selectedDefaultFirmware, setSelectedDefaultFirmware] = useState<string>('ble');
+  const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
 
   const transportRef = useRef<Transport | null>(null);
   const espLoaderRef = useRef<ExtendedESPLoader | null>(null);
@@ -203,8 +251,86 @@ export default function ESP32Flasher() {
     try {
       const firmwares = await getAllFirmwaresFromDB();
       setLocalFirmwares(firmwares);
+      
+      // Check if default firmwares need to be loaded
+      await ensureDefaultFirmwares();
     } catch (error) {
       console.error('Error loading local firmwares:', error);
+    }
+  };
+
+  const ensureDefaultFirmwares = async () => {
+    setIsLoadingDefaults(true);
+    const existingFirmwares = await getAllFirmwaresFromDB();
+    const existingNames = existingFirmwares.map(f => f.name);
+    
+    let loadedCount = 0;
+    for (const firmware of DEFAULT_FIRMWARES) {
+      if (!existingNames.includes(firmware.name)) {
+        try {
+          addLog(`Loading default ${firmware.type.toUpperCase()} firmware...`);
+          const response = await fetch(firmware.url);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            await saveFirmwareToDB(firmware.name, arrayBuffer, firmware.type);
+            addLog(`✓ Added default ${firmware.type.toUpperCase()} firmware to storage`);
+            loadedCount++;
+          } else {
+            addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
+          }
+        } catch (error) {
+          console.error(`Error loading default firmware ${firmware.name}:`, error);
+          addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
+        }
+      }
+    }
+    
+    // Reload firmwares after adding defaults
+    const updatedFirmwares = await getAllFirmwaresFromDB();
+    setLocalFirmwares(updatedFirmwares);
+    
+    if (loadedCount > 0) {
+      addLog(`✓ Loaded ${loadedCount} default firmware(s)`);
+    }
+    
+    setIsLoadingDefaults(false);
+  };
+
+  const loadDefaultFirmware = async (type: 'ble' | 'wifi' | 'serial') => {
+    const firmwareInfo = DEFAULT_FIRMWARES.find(f => f.type === type);
+    if (!firmwareInfo) return;
+
+    setSelectedDefaultFirmware(type);
+    
+    try {
+      addLog(`Selecting ${firmwareInfo.type.toUpperCase()} firmware...`);
+      
+      // Check if already in storage
+      const existing = localFirmwares.find(f => f.name === firmwareInfo.name);
+      if (existing) {
+        const arrayBuffer = await getFirmwareFromDB(firmwareInfo.name);
+        if (arrayBuffer) {
+          const file = new File([arrayBuffer], firmwareInfo.name, { type: 'application/octet-stream' });
+          setFirmwareFile(file);
+          addLog(`✓ Selected ${firmwareInfo.type.toUpperCase()} firmware (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+        }
+      } else {
+        // Download and save
+        addLog(`Downloading ${firmwareInfo.type.toUpperCase()} firmware...`);
+        const response = await fetch(firmwareInfo.url);
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const file = new File([arrayBuffer], firmwareInfo.name, { type: 'application/octet-stream' });
+          setFirmwareFile(file);
+          await saveFirmwareToDB(firmwareInfo.name, arrayBuffer, firmwareInfo.type);
+          await loadLocalFirmwares();
+          addLog(`✓ Downloaded and selected ${firmwareInfo.type.toUpperCase()} firmware (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+        } else {
+          addLog(`❌ Could not load ${firmwareInfo.type.toUpperCase()} firmware`);
+        }
+      }
+    } catch (error) {
+      addLog(`❌ Error loading ${firmwareInfo.type.toUpperCase()} firmware: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -244,6 +370,7 @@ export default function ESP32Flasher() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showAdvanced]);
+
   const connectToDevice = async () => {
     try {
       // Check for Web Serial API support
@@ -325,6 +452,7 @@ export default function ESP32Flasher() {
         setFirmwareFile(file);
         addLog(`Selected firmware: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
         setShowAddFirmwareDialog(false);
+        setSelectedDefaultFirmware('');
 
         // Save to local storage
         file.arrayBuffer().then(arrayBuffer => {
@@ -619,6 +747,7 @@ export default function ESP32Flasher() {
 
       const file = new File([arrayBuffer], name, { type: 'application/octet-stream' });
       setFirmwareFile(file);
+      setSelectedDefaultFirmware('');
       setShowGithubDialog(false);
       addLog(`✓ Successfully downloaded and saved ${name}`);
       addLog(`✓ Ready to flash! Click "Flash Firmware" when device is connected.`);
@@ -645,6 +774,9 @@ export default function ESP32Flasher() {
       if (arrayBuffer) {
         const file = new File([arrayBuffer], name, { type: 'application/octet-stream' });
         setFirmwareFile(file);
+        // Clear default selection if loading a custom firmware
+        const isDefault = DEFAULT_FIRMWARES.some(f => f.name === name);
+        setSelectedDefaultFirmware(isDefault ? DEFAULT_FIRMWARES.find(f => f.name === name)?.type || '' : '');
         addLog(`✓ Loaded ${name} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
       } else {
         addLog(`❌ Firmware ${name} not found in storage`);
@@ -656,12 +788,20 @@ export default function ESP32Flasher() {
 
   const deleteFirmwareFromStorage = async (name: string) => {
     try {
+      // Check if it's a default firmware
+      const isDefault = DEFAULT_FIRMWARES.some(f => f.name === name);
+      if (isDefault) {
+        addLog(`⚠ Cannot delete default firmware: ${name}`);
+        return;
+      }
+
       await deleteFirmwareFromDB(name);
       await loadLocalFirmwares();
       addLog(`Deleted ${name} from storage`);
 
       if (firmwareFile && firmwareFile.name === name) {
         setFirmwareFile(null);
+        setSelectedDefaultFirmware('');
       }
     } catch (error: unknown) {
       addLog(`Error deleting firmware: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -670,12 +810,27 @@ export default function ESP32Flasher() {
 
   const clearAllFirmwares = async () => {
     try {
-      if (confirm('Are you sure you want to delete all stored firmwares? This cannot be undone.')) {
-        addLog('Clearing all stored firmwares...');
-        await resetDatabase();
+      if (confirm('Are you sure you want to delete all custom firmwares? Default firmwares will be preserved.')) {
+        addLog('Clearing all custom firmwares...');
+        
+        // Get all firmwares and filter out defaults
+        const allFirmwares = await getAllFirmwaresFromDB();
+        const customFirmwares = allFirmwares.filter(f => !f.isDefault);
+        
+        // Delete custom firmwares one by one
+        for (const firmware of customFirmwares) {
+          await deleteFirmwareFromDB(firmware.name);
+        }
+        
         await loadLocalFirmwares();
-        setFirmwareFile(null);
-        addLog('✓ All firmwares cleared from storage');
+        
+        // Clear selection if it was a custom firmware
+        if (firmwareFile && !DEFAULT_FIRMWARES.some(f => f.name === firmwareFile.name)) {
+          setFirmwareFile(null);
+          setSelectedDefaultFirmware('');
+        }
+        
+        addLog(`✓ Cleared ${customFirmwares.length} custom firmware(s) from storage`);
       }
     } catch (error: unknown) {
       addLog(`Error clearing storage: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -739,10 +894,7 @@ export default function ESP32Flasher() {
                   >
                     {isFetchingGithub ? (
                       <>
-                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
+                        <Loader2 className="h-4 w-4 animate-spin" />
                         Loading...
                       </>
                     ) : (
@@ -758,8 +910,89 @@ export default function ESP32Flasher() {
               </div>
 
               <div className="space-y-4">
+                {/* Default Firmware Selection */}
+                <div className="default-firmwares-section">
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Pre-built Firmwares
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <button
+                      onClick={() => loadDefaultFirmware('ble')}
+                      disabled={isLoadingDefaults}
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'ble'
+                        ? 'bg-blue-600 border-blue-500'
+                        : isLoadingDefaults
+                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
+                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                        }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        {isLoadingDefaults ? (
+                          <Loader2 className="h-5 w-5 text-white animate-spin" />
+                        ) : (
+                          <Bluetooth className="h-5 w-5 text-white" />
+                        )}
+                        <span className="text-xs font-medium text-white">BLE</span>
+                        <span className="text-xs text-gray-300">Wireless</span>
+                        {isLoadingDefaults && (
+                          <span className="text-xs text-gray-400 mt-1">Loading...</span>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => loadDefaultFirmware('wifi')}
+                      disabled={isLoadingDefaults}
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'wifi'
+                        ? 'bg-green-600 border-green-500'
+                        : isLoadingDefaults
+                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
+                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                        }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        {isLoadingDefaults ? (
+                          <Loader2 className="h-5 w-5 text-white animate-spin" />
+                        ) : (
+                          <Wifi className="h-5 w-5 text-white" />
+                        )}
+                        <span className="text-xs font-medium text-white">WiFi</span>
+                        <span className="text-xs text-gray-300">Wireless</span>
+                        {isLoadingDefaults && (
+                          <span className="text-xs text-gray-400 mt-1">Loading...</span>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => loadDefaultFirmware('serial')}
+                      disabled={isLoadingDefaults}
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'serial'
+                        ? 'bg-purple-600 border-purple-500'
+                        : isLoadingDefaults
+                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
+                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                        }`}
+                    >
+                      <div className="flex flex-col items-center gap-1">
+                        {isLoadingDefaults ? (
+                          <Loader2 className="h-5 w-5 text-white animate-spin" />
+                        ) : (
+                          <Usb className="h-5 w-5 text-white" />
+                        )}
+                        <span className="text-xs font-medium text-white">Serial</span>
+                        <span className="text-xs text-gray-300">Direct USB</span>
+                        {isLoadingDefaults && (
+                          <span className="text-xs text-gray-400 mt-1">Loading...</span>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-4">
+                    Select a pre-built firmware version. These will be automatically downloaded and stored locally.
+                  </p>
+                </div>
+
                 {/* Selected Firmware Display */}
-                <div>
+                <div className="selected-firmware-display">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     Selected Firmware
                   </label>
@@ -769,9 +1002,22 @@ export default function ESP32Flasher() {
                         <div>
                           <p className="text-green-400 font-medium">{firmwareFile.name}</p>
                           <p className="text-gray-400 text-sm">{(firmwareFile.size / 1024).toFixed(2)} KB</p>
+                          {selectedDefaultFirmware && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs">
+                                {selectedDefaultFirmware.toUpperCase()}
+                              </span>
+                              <span className="text-xs text-gray-400">
+                                {DEFAULT_FIRMWARES.find(f => f.type === selectedDefaultFirmware)?.description}
+                              </span>
+                            </div>
+                          )}
                         </div>
                         <button
-                          onClick={() => setFirmwareFile(null)}
+                          onClick={() => {
+                            setFirmwareFile(null);
+                            setSelectedDefaultFirmware('');
+                          }}
                           className="text-red-400 hover:text-red-300"
                         >
                           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -783,7 +1029,7 @@ export default function ESP32Flasher() {
                   ) : (
                     <div className="p-4 bg-gray-900 rounded-lg border border-gray-600 text-center">
                       <p className="text-gray-400">No firmware selected</p>
-                      <p className="text-gray-500 text-sm mt-1">Use &quot;Add Firmware&quot; or &quot;Get from GitHub&quot; to select a firmware</p>
+                      <p className="text-gray-500 text-sm mt-1">Select a pre-built version or add your own firmware</p>
                     </div>
                   )}
                 </div>
@@ -891,11 +1137,11 @@ export default function ESP32Flasher() {
                   <span className="px-2 py-1 bg-blue-600 text-white rounded text-xs">
                     {localFirmwares.length}
                   </span>
-                  {localFirmwares.length > 0 && (
+                  {localFirmwares.some(f => !f.isDefault) && (
                     <button
                       onClick={clearAllFirmwares}
                       className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
-                      title="Clear All"
+                      title="Clear All Custom"
                     >
                       🗑️
                     </button>
@@ -904,49 +1150,72 @@ export default function ESP32Flasher() {
               </div>
 
               <div className="flex-1 overflow-y-auto">
-                {localFirmwares.length === 0 ? (
+                {isLoadingDefaults ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="h-8 w-8 text-blue-500 mx-auto mb-3 animate-spin" />
+                    <p className="text-gray-400 text-sm">Loading default firmwares...</p>
+                  </div>
+                ) : localFirmwares.length === 0 ? (
                   <div className="text-center py-8">
                     <svg className="h-12 w-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     <p className="text-gray-400 text-sm">No firmwares stored locally.</p>
-                    <p className="text-gray-500 text-xs mt-1">Download from GitHub or add local files to store them here.</p>
+                    <p className="text-gray-500 text-xs mt-1">Default firmwares will be loaded automatically.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {localFirmwares.map((firmware, index) => (
-                      <div
-                        key={index}
-                        className={`border rounded-lg p-3 transition-colors ${firmwareFile?.name === firmware.name
-                          ? 'border-green-500 bg-green-900 bg-opacity-20'
-                          : 'border-gray-600 hover:bg-gray-700'
-                          }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white font-medium text-sm truncate">{firmware.name}</p>
-                            <div className="flex justify-between mt-1 text-xs text-gray-400">
-                              <span>{(firmware.size / 1024).toFixed(1)} KB</span>
-                              <span>{new Date(firmware.timestamp).toLocaleDateString()}</span>
+                    {localFirmwares.map((firmware, index) => {
+                      const isDefault = firmware.isDefault;
+                      const typeClass = isDefault ? {
+                        ble: 'bg-blue-600',
+                        wifi: 'bg-green-600',
+                        serial: 'bg-purple-600'
+                      }[firmware.type || ''] : 'bg-gray-600';
+
+                      return (
+                        <div
+                          key={index}
+                          className={`firmware-list-item border rounded-lg p-3 transition-colors ${firmwareFile?.name === firmware.name
+                              ? 'border-green-500 bg-green-900 bg-opacity-20'
+                              : 'border-gray-600 hover:bg-gray-700'
+                            }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <p className="text-white font-medium text-sm truncate">{firmware.name}</p>
+                                {isDefault && firmware.type && (
+                                  <span className={`px-2 py-0.5 ${typeClass} text-white rounded text-xs`}>
+                                    {firmware.type.toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex justify-between mt-1 text-xs text-gray-400">
+                                <span>{(firmware.size / 1024).toFixed(1)} KB</span>
+                                <span>{new Date(firmware.timestamp).toLocaleDateString()}</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={() => loadFirmwareFromStorage(firmware.name)}
+                              className={`flex-1 px-2 py-1 ${firmwareFile?.name === firmware.name ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded text-xs transition-colors`}
+                            >
+                              {firmwareFile?.name === firmware.name ? 'Selected' : 'Load'}
+                            </button>
+                            {!isDefault && (
+                              <button
+                                onClick={() => deleteFirmwareFromStorage(firmware.name)}
+                                className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={() => loadFirmwareFromStorage(firmware.name)}
-                            className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
-                          >
-                            Load
-                          </button>
-                          <button
-                            onClick={() => deleteFirmwareFromStorage(firmware.name)}
-                            className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -960,10 +1229,14 @@ export default function ESP32Flasher() {
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                    <span>Firmware in storage</span>
+                    <span>Default firmware (cannot be deleted)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+                    <span>Custom firmware</span>
                   </div>
                   <p className="text-gray-400 text-xs mt-2">
-                    Firmwares are stored in your browser and persist between sessions.
+                    Default firmwares are included with the app. All firmwares are stored in your browser.
                   </p>
                 </div>
               </div>
@@ -1066,10 +1339,7 @@ export default function ESP32Flasher() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3 flex-1">
                             {isDownloading ? (
-                              <svg className="animate-spin h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
+                              <Loader2 className="h-5 w-5 text-blue-400 animate-spin" />
                             ) : isInStorage ? (
                               <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1102,7 +1372,7 @@ export default function ESP32Flasher() {
           </div>
         </div>
       )}
-      <AppTour autoStart={false} />
+      <AppTour autoStart={true} />
     </div>
   );
 }

@@ -152,3 +152,71 @@ body {
   background: rgba(0, 0, 0, 0.5) !important; /* Even more transparent */
   z-index: 9999 !important;
 }
+
+/* Add to your global.css or component styles */
+.driver-popover-custom {
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border: 1px solid #374151;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.driver-popover-custom .driver-popover-title {
+  color: #60a5fa;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.driver-popover-custom .driver-popover-description {
+  color: #d1d5db;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.driver-popover-custom .driver-popover-footer {
+  margin-top: 16px;
+}
+
+.driver-popover-custom .driver-popover-progress-text {
+  color: #9ca3af;
+  font-size: 0.9rem;
+}
+
+.driver-popover-custom .driver-popover-navigation-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.driver-popover-custom .driver-popover-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.driver-popover-custom .driver-popover-btn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  transform: translateY(-1px);
+}
+
+.driver-popover-custom .driver-popover-btn.driver-popover-prev-btn {
+  background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
+}
+
+.driver-popover-custom .driver-popover-btn.driver-popover-prev-btn:hover {
+  background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+}
+
+.driver-popover-custom .driver-popover-close-btn {
+  color: #9ca3af;
+  opacity: 0.8;
+}
+
+.driver-popover-custom .driver-popover-close-btn:hover {
+  color: #d1d5db;
+  opacity: 1;
+}

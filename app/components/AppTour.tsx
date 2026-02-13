@@ -16,7 +16,16 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.connection-section',
         popover: {
           title: '🔌 Device Connection',
-          description: 'Start by connecting your ESP32 device. Click "Connect Device" and select the correct COM port when prompted.',
+          description: 'Start by connecting your NPG Lite device or ESP32 device. Click "Connect Device" and select the correct COM port when prompted.',
+          side: 'bottom' as const,
+          align: 'start' as const,
+        },
+      },
+      {
+        element: '.default-firmwares-section',
+        popover: {
+          title: '📱 Built-in Firmwares',
+          description: 'Quickly select from three pre-built firmware versions: BLE (Bluetooth), WiFi, or Serial (direct USB). These are included with the app and will be stored locally.',
           side: 'bottom' as const,
           align: 'start' as const,
         },
@@ -25,7 +34,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.firmware-selection',
         popover: {
           title: '📦 Firmware Selection',
-          description: 'Choose your firmware here. You can add local .bin files or download from GitHub releases.',
+          description: 'Choose your firmware here. You can select built-in versions, add local .bin files, or download from GitHub releases.',
           side: 'bottom' as const,
           align: 'start' as const,
         },
@@ -33,8 +42,8 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.add-firmware-btn',
         popover: {
-          title: '➕ Add Local Firmware',
-          description: 'Upload firmware .bin files from your computer. They will be saved in browser storage for future use.',
+          title: '➕ Add Custom Firmware',
+          description: 'Upload your own firmware .bin files from your computer. They will be saved in browser storage for future use and appear in the Local Firmwares list.',
           side: 'left' as const,
           align: 'start' as const,
         },
@@ -43,16 +52,25 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.github-firmware-btn',
         popover: {
           title: '🐙 Get from GitHub',
-          description: 'Download the latest firmware releases directly from the GitHub repository.',
+          description: 'Download the latest firmware releases directly from the official GitHub repository.',
           side: 'left' as const,
+          align: 'start' as const,
+        },
+      },
+      {
+        element: '.selected-firmware-display',
+        popover: {
+          title: '✅ Selected Firmware',
+          description: 'Currently selected firmware appears here. You can see the file name, size, and type. Click the X to clear selection.',
+          side: 'bottom' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.flash-address-section',
         popover: {
-          title: '⚙️ Flash Address',
-          description: 'Advanced option: Set the flash memory address (usually 0x10000 for application partition).',
+          title: '⚙️ Advanced Options',
+          description: 'Set custom flash memory address (default is 0x10000 for application partition). Only change if you know what you\'re doing!',
           side: 'top' as const,
           align: 'start' as const,
         },
@@ -61,7 +79,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.flash-button',
         popover: {
           title: '🚀 Flash Firmware',
-          description: 'Once device is connected and firmware is selected, click here to start the flashing process.',
+          description: 'Once device is connected and firmware is selected, click here to start the flashing process. Do not disconnect during flashing!',
           side: 'top' as const,
           align: 'center' as const,
         },
@@ -70,7 +88,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.console-section',
         popover: {
           title: '📟 Console Output',
-          description: 'Watch real-time logs here during connection and flashing process. Clear logs with the Clear button.',
+          description: 'Watch real-time logs here during connection and flashing process. Clear logs with the Clear button if needed.',
           side: 'left' as const,
           align: 'start' as const,
         },
@@ -78,8 +96,18 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.local-firmwares-section',
         popover: {
-          title: '💾 Local Storage',
-          description: 'Manage your downloaded and uploaded firmwares. You can load your downloaded firmware for flashing. They persist between browser sessions.',          side: 'left' as const,
+          title: '💾 Local Firmware Storage',
+          description: 'Manage all your firmwares here. Built-in firmwares (with colored badges) cannot be deleted. Custom firmwares can be loaded or deleted.',
+          side: 'left' as const,
+          align: 'start' as const,
+        },
+      },
+      {
+        element: '.firmware-list-item:first-child',
+        popover: {
+          title: '📂 Firmware Management',
+          description: 'Each firmware shows its name, size, and date. Click "Load" to select it, or "Delete" to remove custom firmwares (built-in ones are protected).',
+          side: 'left' as const,
           align: 'start' as const,
         },
       },
@@ -87,7 +115,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.progress-section',
         popover: {
           title: '📊 Progress Tracking',
-          description: 'Monitor flashing progress here. Do not disconnect the device during this process!',
+          description: 'Monitor flashing progress here. The green bar shows completion percentage. Wait for 100% before disconnecting!',
           side: 'top' as const,
           align: 'center' as const,
         },
@@ -102,6 +130,20 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       allowClose: true,
       steps: tourSteps,
       popoverClass: 'driver-popover-custom',
+      onDestroyed: () => {
+        // Reset tour for next time
+        setTimeout(() => {
+          driverRef.current = driver({
+            showProgress: true,
+            animate: true,
+            overlayOpacity: 0.5,
+            smoothScroll: false,
+            allowClose: true,
+            steps: tourSteps,
+            popoverClass: 'driver-popover-custom',
+          });
+        }, 100);
+      }
     });
 
     if (autoStart) {
@@ -116,7 +158,9 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   }, [autoStart]);
 
   const startTour = () => {
-    driverRef.current?.drive();
+    if (driverRef.current) {
+      driverRef.current.drive();
+    }
   };
 
   return (
