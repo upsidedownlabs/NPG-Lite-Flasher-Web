@@ -165,7 +165,7 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         type?: string;
         data: ArrayBuffer;
       }>;
-      
+
       const firmwares: FirmwareInfo[] = items.map(item => ({
         name: item.name,
         size: item.size,
@@ -173,7 +173,7 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         type: item.type,
         isDefault: item.type && ['ble', 'wifi', 'serial'].includes(item.type) ? true : undefined
       }));
-      
+
       resolve(firmwares);
     };
   });
@@ -251,7 +251,7 @@ export default function ESP32Flasher() {
     try {
       const firmwares = await getAllFirmwaresFromDB();
       setLocalFirmwares(firmwares);
-      
+
       // Check if default firmwares need to be loaded
       await ensureDefaultFirmwares();
     } catch (error) {
@@ -263,7 +263,7 @@ export default function ESP32Flasher() {
     setIsLoadingDefaults(true);
     const existingFirmwares = await getAllFirmwaresFromDB();
     const existingNames = existingFirmwares.map(f => f.name);
-    
+
     let loadedCount = 0;
     for (const firmware of DEFAULT_FIRMWARES) {
       if (!existingNames.includes(firmware.name)) {
@@ -284,27 +284,30 @@ export default function ESP32Flasher() {
         }
       }
     }
-    
+
     // Reload firmwares after adding defaults
     const updatedFirmwares = await getAllFirmwaresFromDB();
     setLocalFirmwares(updatedFirmwares);
-    
+
     if (loadedCount > 0) {
       addLog(`✓ Loaded ${loadedCount} default firmware(s)`);
     }
-    
+
     setIsLoadingDefaults(false);
   };
 
   const loadDefaultFirmware = async (type: 'ble' | 'wifi' | 'serial') => {
+    // Block if flashing is in progress
+    if (isFlashing) return;
+
     const firmwareInfo = DEFAULT_FIRMWARES.find(f => f.type === type);
     if (!firmwareInfo) return;
 
     setSelectedDefaultFirmware(type);
-    
+
     try {
       addLog(`Selecting ${firmwareInfo.type.toUpperCase()} firmware...`);
-      
+
       // Check if already in storage
       const existing = localFirmwares.find(f => f.name === firmwareInfo.name);
       if (existing) {
@@ -446,6 +449,9 @@ export default function ESP32Flasher() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Block file upload if flashing is in progress
+    if (isFlashing) return;
+
     const file = e.target.files?.[0];
     if (file) {
       if (file.name.endsWith('.bin')) {
@@ -470,6 +476,7 @@ export default function ESP32Flasher() {
   };
 
   const triggerFileInput = () => {
+    if (isFlashing) return;
     fileInputRef.current?.click();
   };
 
@@ -611,6 +618,9 @@ export default function ESP32Flasher() {
   };
 
   const fetchGithubReleases = async () => {
+    // Block if flashing is in progress
+    if (isFlashing) return;
+
     setIsFetchingGithub(true);
     try {
       addLog(`Fetching firmwares from GitHub: ${githubRepo}...`);
@@ -767,6 +777,9 @@ export default function ESP32Flasher() {
   };
 
   const loadFirmwareFromStorage = async (name: string) => {
+    // Block if flashing is in progress
+    if (isFlashing) return;
+
     try {
       addLog(`Loading ${name} from storage...`);
       const arrayBuffer = await getFirmwareFromDB(name);
@@ -787,6 +800,9 @@ export default function ESP32Flasher() {
   };
 
   const deleteFirmwareFromStorage = async (name: string) => {
+    // Block if flashing is in progress
+    if (isFlashing) return;
+
     try {
       // Check if it's a default firmware
       const isDefault = DEFAULT_FIRMWARES.some(f => f.name === name);
@@ -809,33 +825,39 @@ export default function ESP32Flasher() {
   };
 
   const clearAllFirmwares = async () => {
+    // Block if flashing is in progress
+    if (isFlashing) return;
+
     try {
       if (confirm('Are you sure you want to delete all custom firmwares? Default firmwares will be preserved.')) {
         addLog('Clearing all custom firmwares...');
-        
+
         // Get all firmwares and filter out defaults
         const allFirmwares = await getAllFirmwaresFromDB();
         const customFirmwares = allFirmwares.filter(f => !f.isDefault);
-        
+
         // Delete custom firmwares one by one
         for (const firmware of customFirmwares) {
           await deleteFirmwareFromDB(firmware.name);
         }
-        
+
         await loadLocalFirmwares();
-        
+
         // Clear selection if it was a custom firmware
         if (firmwareFile && !DEFAULT_FIRMWARES.some(f => f.name === firmwareFile.name)) {
           setFirmwareFile(null);
           setSelectedDefaultFirmware('');
         }
-        
+
         addLog(`✓ Cleared ${customFirmwares.length} custom firmware(s) from storage`);
       }
     } catch (error: unknown) {
       addLog(`Error clearing storage: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
+
+  // Derived: all interactive firmware controls should be locked while flashing
+  const firmwareControlsDisabled = isFlashing || isLoadingDefaults;
 
   return (
     <div className="h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-4 overflow-y-auto">
@@ -853,14 +875,16 @@ export default function ESP32Flasher() {
               {!isConnected ? (
                 <button
                   onClick={connectToDevice}
-                  className="connection-section px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                  disabled={isFlashing}
+                  className="connection-section px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
                   Connect Device
                 </button>
               ) : (
                 <button
                   onClick={disconnectDevice}
-                  className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                  disabled={isFlashing}
+                  className="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
                   Disconnect
                 </button>
@@ -878,19 +902,23 @@ export default function ESP32Flasher() {
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
                 <h2 className="text-lg font-semibold text-white">Firmware Binary</h2>
                 <div className="flex gap-2">
+                  {/* ── ADD FIRMWARE button: disabled while flashing ── */}
                   <button
                     onClick={() => setShowAddFirmwareDialog(true)}
-                    className="add-firmware-btn flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors"
+                    disabled={isFlashing}
+                    className="add-firmware-btn flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-lg text-sm transition-colors"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
                     Add Firmware
                   </button>
+
+                  {/* ── GET FROM GITHUB button: disabled while flashing ── */}
                   <button
                     onClick={fetchGithubReleases}
-                    disabled={isFetchingGithub}
-                    className="github-firmware-btn flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg text-sm transition-colors"
+                    disabled={isFetchingGithub || isFlashing}
+                    className="github-firmware-btn flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-lg text-sm transition-colors"
                   >
                     {isFetchingGithub ? (
                       <>
@@ -914,17 +942,24 @@ export default function ESP32Flasher() {
                 <div className="default-firmwares-section">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     Pre-built Firmwares
+                    {isFlashing && (
+                      <span className="ml-2 text-xs text-yellow-400 font-normal">
+                        (locked during flash)
+                      </span>
+                    )}
                   </label>
                   <div className="grid grid-cols-3 gap-2 mb-4">
+                    {/* ── BLE button: disabled while flashing OR loading defaults ── */}
                     <button
                       onClick={() => loadDefaultFirmware('ble')}
-                      disabled={isLoadingDefaults}
-                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'ble'
-                        ? 'bg-blue-600 border-blue-500'
-                        : isLoadingDefaults
-                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
-                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                        }`}
+                      disabled={firmwareControlsDisabled}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        selectedDefaultFirmware === 'ble'
+                          ? 'bg-blue-600 border-blue-500'
+                          : firmwareControlsDisabled
+                            ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
+                            : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                      }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -939,15 +974,18 @@ export default function ESP32Flasher() {
                         )}
                       </div>
                     </button>
+
+                    {/* ── WiFi button: disabled while flashing OR loading defaults ── */}
                     <button
                       onClick={() => loadDefaultFirmware('wifi')}
-                      disabled={isLoadingDefaults}
-                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'wifi'
-                        ? 'bg-green-600 border-green-500'
-                        : isLoadingDefaults
-                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
-                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                        }`}
+                      disabled={firmwareControlsDisabled}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        selectedDefaultFirmware === 'wifi'
+                          ? 'bg-green-600 border-green-500'
+                          : firmwareControlsDisabled
+                            ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
+                            : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                      }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -962,15 +1000,18 @@ export default function ESP32Flasher() {
                         )}
                       </div>
                     </button>
+
+                    {/* ── Serial button: disabled while flashing OR loading defaults ── */}
                     <button
                       onClick={() => loadDefaultFirmware('serial')}
-                      disabled={isLoadingDefaults}
-                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'serial'
-                        ? 'bg-purple-600 border-purple-500'
-                        : isLoadingDefaults
-                          ? 'bg-gray-800 border-gray-700 cursor-not-allowed'
-                          : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                        }`}
+                      disabled={firmwareControlsDisabled}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        selectedDefaultFirmware === 'serial'
+                          ? 'bg-purple-600 border-purple-500'
+                          : firmwareControlsDisabled
+                            ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
+                            : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
+                      }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -1013,12 +1054,15 @@ export default function ESP32Flasher() {
                             </div>
                           )}
                         </div>
+                        {/* ── Clear selection: disabled while flashing ── */}
                         <button
                           onClick={() => {
+                            if (isFlashing) return;
                             setFirmwareFile(null);
                             setSelectedDefaultFirmware('');
                           }}
-                          className="text-red-400 hover:text-red-300"
+                          disabled={isFlashing}
+                          className="text-red-400 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1039,7 +1083,8 @@ export default function ESP32Flasher() {
                   <button
                     ref={advancedButtonRef}
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+                    disabled={isFlashing}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <svg
                       className={`h-4 w-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`}
@@ -1052,7 +1097,7 @@ export default function ESP32Flasher() {
                     Advanced Option
                   </button>
 
-                  {showAdvanced && (
+                  {showAdvanced && !isFlashing && (
                     <div className="advanced-popup absolute bottom-full left-0 mb-2 z-10 w-80 p-4 bg-gray-800 rounded-lg border border-gray-600 shadow-xl">
                       <label className="block text-sm font-medium text-gray-300 mb-2">
                         Flash Address (hex)
@@ -1140,7 +1185,8 @@ export default function ESP32Flasher() {
                   {localFirmwares.some(f => !f.isDefault) && (
                     <button
                       onClick={clearAllFirmwares}
-                      className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                      disabled={isFlashing}
+                      className="px-2 py-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded text-xs transition-colors"
                       title="Clear All Custom"
                     >
                       🗑️
@@ -1174,9 +1220,12 @@ export default function ESP32Flasher() {
                       }[firmware.type || ''] : 'bg-gray-600';
 
                       return (
+                        // ── Firmware card: pointer-events-none + dim while flashing ──
                         <div
                           key={index}
-                          className={`firmware-list-item border rounded-lg p-3 transition-colors ${firmwareFile?.name === firmware.name
+                          className={`firmware-list-item border rounded-lg p-3 transition-colors
+                            ${isFlashing ? 'opacity-50 pointer-events-none' : ''}
+                            ${firmwareFile?.name === firmware.name
                               ? 'border-green-500 bg-green-900 bg-opacity-20'
                               : 'border-gray-600 hover:bg-gray-700'
                             }`}
@@ -1198,16 +1247,24 @@ export default function ESP32Flasher() {
                             </div>
                           </div>
                           <div className="flex gap-2 mt-2">
+                            {/* ── Load button: disabled while flashing ── */}
                             <button
                               onClick={() => loadFirmwareFromStorage(firmware.name)}
-                              className={`flex-1 px-2 py-1 ${firmwareFile?.name === firmware.name ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white rounded text-xs transition-colors`}
+                              disabled={isFlashing}
+                              className={`flex-1 px-2 py-1 disabled:cursor-not-allowed
+                                ${firmwareFile?.name === firmware.name
+                                  ? 'bg-green-600 hover:bg-green-700'
+                                  : 'bg-blue-600 hover:bg-blue-700'
+                                } text-white rounded text-xs transition-colors`}
                             >
                               {firmwareFile?.name === firmware.name ? 'Selected' : 'Load'}
                             </button>
+                            {/* ── Delete button: disabled while flashing ── */}
                             {!isDefault && (
                               <button
                                 onClick={() => deleteFirmwareFromStorage(firmware.name)}
-                                className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs transition-colors"
+                                disabled={isFlashing}
+                                className="flex-1 px-2 py-1 bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed text-white rounded text-xs transition-colors"
                               >
                                 Delete
                               </button>
@@ -1222,6 +1279,14 @@ export default function ESP32Flasher() {
 
               {/* Quick Info */}
               <div className="mt-4 pt-4 border-t border-gray-700">
+                {isFlashing && (
+                  <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-yellow-900 bg-opacity-40 border border-yellow-700 rounded-lg">
+                    <Loader2 className="h-4 w-4 text-yellow-400 animate-spin flex-shrink-0" />
+                    <p className="text-yellow-400 text-xs font-medium">
+                      Firmware selection locked during flashing
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-2 text-xs text-gray-300">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -1252,10 +1317,11 @@ export default function ESP32Flasher() {
         onChange={handleFileUpload}
         accept=".bin"
         className="hidden"
+        disabled={isFlashing}
       />
 
       {/* Add Firmware Dialog */}
-      {showAddFirmwareDialog && (
+      {showAddFirmwareDialog && !isFlashing && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-gray-800 rounded-lg shadow-xl max-w-md w-full border border-gray-700">
             <div className="border-b border-gray-700 p-4 flex justify-between items-center">
@@ -1372,7 +1438,7 @@ export default function ESP32Flasher() {
           </div>
         </div>
       )}
-      <AppTour autoStart={true} />
+      <AppTour autoStart={false} />
     </div>
   );
 }
