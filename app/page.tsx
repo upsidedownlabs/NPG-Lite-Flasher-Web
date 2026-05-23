@@ -949,13 +949,13 @@ export default function ESP32Flasher() {
                     )}
                   </label>
                   <div className="grid grid-cols-3 gap-2 mb-4">
-                    {/* ── BLE button: disabled while flashing OR loading defaults ── */}
+                    {/* ── BLE button ── */}
                     <button
                       onClick={() => loadDefaultFirmware('ble')}
-                      disabled={firmwareControlsDisabled}
+                      disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'ble'}
                       className={`p-3 rounded-lg border transition-colors ${
                         selectedDefaultFirmware === 'ble'
-                          ? 'bg-blue-600 border-blue-500'
+                          ? 'bg-blue-600 border-blue-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
@@ -975,13 +975,13 @@ export default function ESP32Flasher() {
                       </div>
                     </button>
 
-                    {/* ── WiFi button: disabled while flashing OR loading defaults ── */}
+                    {/* ── WiFi button ── */}
                     <button
                       onClick={() => loadDefaultFirmware('wifi')}
-                      disabled={firmwareControlsDisabled}
+                      disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'wifi'}
                       className={`p-3 rounded-lg border transition-colors ${
                         selectedDefaultFirmware === 'wifi'
-                          ? 'bg-green-600 border-green-500'
+                          ? 'bg-green-600 border-green-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
@@ -1001,13 +1001,13 @@ export default function ESP32Flasher() {
                       </div>
                     </button>
 
-                    {/* ── Serial button: disabled while flashing OR loading defaults ── */}
+                    {/* ── Serial button ── */}
                     <button
                       onClick={() => loadDefaultFirmware('serial')}
-                      disabled={firmwareControlsDisabled}
+                      disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'serial'}
                       className={`p-3 rounded-lg border transition-colors ${
                         selectedDefaultFirmware === 'serial'
-                          ? 'bg-purple-600 border-purple-500'
+                          ? 'bg-purple-600 border-purple-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
@@ -1247,14 +1247,14 @@ export default function ESP32Flasher() {
                             </div>
                           </div>
                           <div className="flex gap-2 mt-2">
-                            {/* ── Load button: disabled while flashing ── */}
+                            {/* ── Load button: disabled while flashing or already selected ── */}
                             <button
                               onClick={() => loadFirmwareFromStorage(firmware.name)}
-                              disabled={isFlashing}
-                              className={`flex-1 px-2 py-1 disabled:cursor-not-allowed
+                              disabled={isFlashing || firmwareFile?.name === firmware.name}
+                              className={`flex-1 px-2 py-1
                                 ${firmwareFile?.name === firmware.name
-                                  ? 'bg-green-600 hover:bg-green-700'
-                                  : 'bg-blue-600 hover:bg-blue-700'
+                                  ? 'bg-green-600 cursor-default'
+                                  : 'bg-blue-600 hover:bg-blue-700 disabled:cursor-not-allowed'
                                 } text-white rounded text-xs transition-colors`}
                             >
                               {firmwareFile?.name === firmware.name ? 'Selected' : 'Load'}
