@@ -10,6 +10,9 @@ const DB_NAME = 'ESP32FlasherDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'firmwares';
 
+// Cloudflare Worker proxy URL
+const CLOUDFLARE_WORKER_URL = 'https://npg-lite-web-flasher.myupsidedownlab.workers.dev/';
+
 // Default firmware files
 interface DefaultFirmware {
   name: string;
@@ -701,6 +704,7 @@ export default function ESP32Flasher() {
     }
   };
 
+  // Download function using Cloudflare Worker proxy
   const downloadGithubFirmware = async (url: string, name: string) => {
     setDownloadingFirmware(name);
     setDownloadProgress('Initializing...');
@@ -715,34 +719,39 @@ export default function ESP32Flasher() {
       let arrayBuffer: ArrayBuffer | null = null;
       let successMethod = '';
 
-      // Only use CORS Proxy
+      // Use Cloudflare Worker proxy
       try {
-        setDownloadProgress('Downloading via CORS Proxy...');
-        addLog(`Downloading via CORS Proxy...`);
+        setDownloadProgress('Downloading via Cloudflare Worker...');
+        addLog(`Downloading via Cloudflare Worker...`);
 
-        const response = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`, {
+        const response = await fetch(`${CLOUDFLARE_WORKER_URL}?url=${encodeURIComponent(url)}`, {
           method: 'GET',
           headers: commonHeaders,
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(30000),
           mode: 'cors'
         });
 
         if (response.ok && response.status === 200) {
           const contentType = response.headers.get('content-type');
           if (contentType && contentType.includes('text/html')) {
-            addLog(`⚠ CORS Proxy: Got HTML response, skipping`);
+            addLog(`⚠ Worker: Got HTML response, skipping`);
           } else {
-            setDownloadProgress(`Downloading via CORS Proxy...`);
+            setDownloadProgress(`Saving firmware data...`);
             arrayBuffer = await response.arrayBuffer();
 
             if (arrayBuffer.byteLength > 1000) {
-              successMethod = 'CORS Proxy';
+              successMethod = 'Cloudflare Worker';
               addLog(`✓ Download successful via ${successMethod} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+            } else {
+              addLog(`⚠ Worker: Response too small (${arrayBuffer.byteLength} bytes), may be invalid`);
             }
           }
+        } else {
+          addLog(`⚠ Worker responded with status: ${response.status}`);
         }
       } catch (error: unknown) {
-        console.log('CORS proxy download failed:', error);
+        console.log('Cloudflare Worker download failed:', error);
+        addLog(`⚠ Cloudflare Worker failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
       if (!arrayBuffer || arrayBuffer.byteLength < 1000) {
