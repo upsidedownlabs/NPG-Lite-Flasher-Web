@@ -229,7 +229,7 @@ export default function ESP32Flasher() {
   const [downloadingFirmware, setDownloadingFirmware] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<string>('');
   const [localFirmwares, setLocalFirmwares] = useState<FirmwareInfo[]>([]);
-  const [selectedDefaultFirmware, setSelectedDefaultFirmware] = useState<string>('ble');
+  const [selectedDefaultFirmware, setSelectedDefaultFirmware] = useState<string>('');
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
 
   const transportRef = useRef<Transport | null>(null);
