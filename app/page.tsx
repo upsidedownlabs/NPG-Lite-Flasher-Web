@@ -638,6 +638,23 @@ export default function ESP32Flasher() {
       addLog(`Writing ${fileEntries.length} file(s) to device...`);
       setProgress(10);
 
+      // Byte-weighted progress tracking. esptool-js's reportProgress gives a
+      // (fileIndex, written, total) triple where written/total is the
+      // *current file's own* completion fraction — not a global one. Since
+      // the bootloader/partition-table/app files can differ hugely in size
+      // (the app is typically much larger), weighting every file as an
+      // equal 1/N share of the bar makes progress jump through small files
+      // and stall on the big one. Instead we weight each file's
+      // contribution by its share of total (uncompressed) bytes so the bar
+      // advances at a rate proportional to actual data written, whether
+      // this is a single-file app flash or a 3-file full flash.
+      const fileSizes = fileEntries.map(f => f.data.length);
+      const totalBytes = fileSizes.reduce((sum, size) => sum + size, 0);
+      const cumulativeBytes = fileSizes.reduce<number[]>((acc, size, i) => {
+        acc.push(i === 0 ? 0 : acc[i - 1] + fileSizes[i - 1]);
+        return acc;
+      }, []);
+
       const esploaderAny = esploader as unknown as {
         writeFlash: (options: {
           fileArray: Array<{ data: string; address: number }>;
@@ -658,8 +675,8 @@ export default function ESP32Flasher() {
         flashMode: 'dio',
         flashFreq: '40m',
         reportProgress: (fileIndex: number, written: number, total: number) => {
-          const fileProgress = (written / total) * 100;
-          const overallFraction = (fileIndex + fileProgress / 100) / fileEntries.length;
+          const bytesDone = cumulativeBytes[fileIndex] + fileSizes[fileIndex] * (written / total);
+          const overallFraction = totalBytes > 0 ? bytesDone / totalBytes : 0;
           setProgress(Math.round(10 + overallFraction * 90));
         }
       });
