@@ -18,7 +18,7 @@ interface DefaultFirmware {
   name: string;
   description: string;
   url: string;
-  type: 'ble' | 'wifi' | 'serial';
+  type: 'ble' | 'wifi' | 'serial' | 'bootloader' | 'partition-table';
 }
 
 const DEFAULT_FIRMWARES: DefaultFirmware[] = [
@@ -39,8 +39,24 @@ const DEFAULT_FIRMWARES: DefaultFirmware[] = [
     description: 'Serial Version - For direct serial communication',
     url: './firmwares/NPG-LITE.ino.bin',
     type: 'serial'
+  },
+  {
+    name: 'bootloader.bin',
+    description: 'Bootloader - required for full/recovery flash',
+    url: './firmwares/bootloader.bin',
+    type: 'bootloader'
+  },
+  {
+    name: 'partition-table.bin',
+    description: 'Partition table - required for full/recovery flash',
+    url: './firmwares/partition-table.bin',
+    type: 'partition-table'
   }
 ];
+
+// Types that should never be user-deletable and never shown in the
+// selectable "app firmware" pickers (they are flashing components, not apps)
+const DEFAULT_TYPES = ['ble', 'wifi', 'serial', 'bootloader', 'partition-table'];
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -174,7 +190,7 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         size: item.size,
         timestamp: item.timestamp,
         type: item.type,
-        isDefault: item.type && ['ble', 'wifi', 'serial'].includes(item.type) ? true : undefined
+        isDefault: item.type && DEFAULT_TYPES.includes(item.type) ? true : undefined
       }));
 
       resolve(firmwares);
@@ -213,6 +229,11 @@ interface GithubRelease {
   assets: GithubAsset[];
 }
 
+// Fixed offsets used when flashing the complete firmware set
+const BOOTLOADER_ADDRESS = 0x0;
+const PARTITION_TABLE_ADDRESS = 0x8000;
+const APP_ADDRESS = 0x10000;
+
 export default function ESP32Flasher() {
   const [isConnected, setIsConnected] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
@@ -221,6 +242,12 @@ export default function ESP32Flasher() {
   const [firmwareFile, setFirmwareFile] = useState<File | null>(null);
   const [chipInfo, setChipInfo] = useState<string>('');
   const [flashAddress, setFlashAddress] = useState<string>('0x10000');
+  const [flashFullFirmware, setFlashFullFirmware] = useState(false);
+  // Explicit, mandatory selections for full-flash mode. All three must be
+  // set by the user (or picked from Local Firmwares) before flashing is
+  // allowed — nothing is auto-guessed by filename.
+  const [bootloaderFile, setBootloaderFile] = useState<File | null>(null);
+  const [partitionTableFile, setPartitionTableFile] = useState<File | null>(null);
   const [showGithubDialog, setShowGithubDialog] = useState(false);
   const [showAddFirmwareDialog, setShowAddFirmwareDialog] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -483,34 +510,150 @@ export default function ESP32Flasher() {
     fileInputRef.current?.click();
   };
 
+  // ── Selection for the mandatory bootloader / partition-table slots ──
+  // These are chosen from Local Firmwares (populated only via "Add Firmware"
+  // or the default auto-downloads) — never a separate upload path.
+  const loadBootloaderFromStorage = async (name: string) => {
+    if (isFlashing) return;
+    if (!name) {
+      setBootloaderFile(null);
+      return;
+    }
+    try {
+      const arrayBuffer = await getFirmwareFromDB(name);
+      if (arrayBuffer) {
+        setBootloaderFile(new File([arrayBuffer], name, { type: 'application/octet-stream' }));
+        addLog(`✓ Bootloader set to ${name} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+      } else {
+        addLog(`❌ Could not load ${name} from storage`);
+      }
+    } catch (error: unknown) {
+      addLog(`Error loading bootloader: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const loadPartitionTableFromStorage = async (name: string) => {
+    if (isFlashing) return;
+    if (!name) {
+      setPartitionTableFile(null);
+      return;
+    }
+    try {
+      const arrayBuffer = await getFirmwareFromDB(name);
+      if (arrayBuffer) {
+        setPartitionTableFile(new File([arrayBuffer], name, { type: 'application/octet-stream' }));
+        addLog(`✓ Partition table set to ${name} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+      } else {
+        addLog(`❌ Could not load ${name} from storage`);
+      }
+    } catch (error: unknown) {
+      addLog(`Error loading partition table: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Converts an ArrayBuffer into the binary-string format esptool-js expects
+  const arrayBufferToBinaryString = (buffer: ArrayBuffer): string =>
+    Array.from(new Uint8Array(buffer)).map(b => String.fromCharCode(b)).join('');
+
   const flashFirmware = async () => {
-    if (!espLoaderRef.current || !firmwareFile) {
-      addLog('No device connected or no firmware file selected');
+    if (!espLoaderRef.current) {
+      addLog('No device connected');
       return;
     }
-    const addrStr = flashAddress.trim();
-    const isValidAddr = /^0x[0-9a-fA-F]+$/.test(addrStr);
-    if (!isValidAddr) {
-      addLog('❌ Invalid flash address. Use hex like 0x10000');
+
+    // In full-flash mode, all three files are mandatory and must be
+    // explicitly selected by the user — no auto-lookup, no guessing by name.
+    if (flashFullFirmware) {
+      if (!bootloaderFile || !partitionTableFile || !firmwareFile) {
+        addLog('❌ Full flash requires all three files to be selected:');
+        addLog(`   Bootloader: ${bootloaderFile ? '✓ ' + bootloaderFile.name : '✗ not selected'}`);
+        addLog(`   Partition table: ${partitionTableFile ? '✓ ' + partitionTableFile.name : '✗ not selected'}`);
+        addLog(`   App: ${firmwareFile ? '✓ ' + firmwareFile.name : '✗ not selected'}`);
+        return;
+      }
+    } else if (!firmwareFile) {
+      addLog('No firmware file selected');
       return;
     }
-    const address = parseInt(addrStr, 16);
+
+    let fileEntries: { data: string; address: number }[] = [];
+
     try {
       setIsFlashing(true);
       setProgress(0);
       addLog('Starting flash process...');
 
+      if (flashFullFirmware) {
+        // ── Full flash: bootloader + partition table + app ──
+        // At this point bootloaderFile, partitionTableFile, and firmwareFile
+        // are guaranteed non-null by the check above.
+        addLog('Full flash selected: writing bootloader + partition table + app');
+
+        const bootloaderBuf = await bootloaderFile!.arrayBuffer();
+        const partitionTableBuf = await partitionTableFile!.arrayBuffer();
+        const appBuf = await firmwareFile!.arrayBuffer();
+
+        fileEntries = [
+          { data: arrayBufferToBinaryString(bootloaderBuf), address: BOOTLOADER_ADDRESS },
+          { data: arrayBufferToBinaryString(partitionTableBuf), address: PARTITION_TABLE_ADDRESS },
+          { data: arrayBufferToBinaryString(appBuf), address: APP_ADDRESS },
+        ];
+
+        addLog(`Bootloader: ${bootloaderFile!.name} — ${(bootloaderBuf.byteLength / 1024).toFixed(2)} KB @ 0x0`);
+        addLog(`Partition table: ${partitionTableFile!.name} — ${(partitionTableBuf.byteLength / 1024).toFixed(2)} KB @ 0x8000`);
+        addLog(`App: ${firmwareFile!.name} — ${(appBuf.byteLength / 1024).toFixed(2)} KB @ 0x10000`);
+      } else {
+        // ── Default behavior: app only, at the configured address ──
+        const addrStr = flashAddress.trim();
+        const isValidAddr = /^0x[0-9a-fA-F]+$/.test(addrStr);
+        if (!isValidAddr) {
+          addLog('❌ Invalid flash address. Use hex like 0x10000');
+          setIsFlashing(false);
+          return;
+        }
+
+        const address = parseInt(addrStr, 16);
+
+        // Guard against accidentally overwriting the bootloader/partition
+        // table region when only flashing a single app binary.
+        if (address < PARTITION_TABLE_ADDRESS + 0x1000) {
+          addLog('❌ This address overlaps the bootloader/partition table region.');
+          addLog('   Enable "Flash complete firmware" to write all components safely,');
+          addLog('   or use an address of 0x10000 or higher for app-only flashing.');
+          setIsFlashing(false);
+          return;
+        }
+
+        const arrayBuffer = await firmwareFile!.arrayBuffer();
+        addLog(`File size: ${arrayBuffer.byteLength} bytes`);
+
+        fileEntries = [{
+          data: arrayBufferToBinaryString(arrayBuffer),
+          address
+        }];
+      }
+
       const esploader = espLoaderRef.current;
-      const arrayBuffer = await firmwareFile.arrayBuffer();
-      addLog(`File size: ${arrayBuffer.byteLength} bytes`);
 
-      const fileArray = [{
-        data: Array.from(new Uint8Array(arrayBuffer)).map(b => String.fromCharCode(b)).join(''),
-        address: address
-      }];
-
-      addLog(`Writing firmware to address ${flashAddress}...`);
+      addLog(`Writing ${fileEntries.length} file(s) to device...`);
       setProgress(10);
+
+      // Byte-weighted progress tracking. esptool-js's reportProgress gives a
+      // (fileIndex, written, total) triple where written/total is the
+      // *current file's own* completion fraction — not a global one. Since
+      // the bootloader/partition-table/app files can differ hugely in size
+      // (the app is typically much larger), weighting every file as an
+      // equal 1/N share of the bar makes progress jump through small files
+      // and stall on the big one. Instead we weight each file's
+      // contribution by its share of total (uncompressed) bytes so the bar
+      // advances at a rate proportional to actual data written, whether
+      // this is a single-file app flash or a 3-file full flash.
+      const fileSizes = fileEntries.map(f => f.data.length);
+      const totalBytes = fileSizes.reduce((sum, size) => sum + size, 0);
+      const cumulativeBytes = fileSizes.reduce<number[]>((acc, size, i) => {
+        acc.push(i === 0 ? 0 : acc[i - 1] + fileSizes[i - 1]);
+        return acc;
+      }, []);
 
       const esploaderAny = esploader as unknown as {
         writeFlash: (options: {
@@ -525,16 +668,16 @@ export default function ESP32Flasher() {
       };
 
       await esploaderAny.writeFlash({
-        fileArray,
+        fileArray: fileEntries,
         flashSize: 'keep',
         eraseAll: false,
         compress: true,
         flashMode: 'dio',
         flashFreq: '40m',
         reportProgress: (fileIndex: number, written: number, total: number) => {
-          const fileProgress = (written / total) * 100;
-          const totalProgress = 10 + (fileProgress * 0.9);
-          setProgress(Math.round(totalProgress));
+          const bytesDone = cumulativeBytes[fileIndex] + fileSizes[fileIndex] * (written / total);
+          const overallFraction = totalBytes > 0 ? bytesDone / totalBytes : 0;
+          setProgress(Math.round(10 + overallFraction * 90));
         }
       });
 
@@ -868,12 +1011,18 @@ export default function ESP32Flasher() {
   // Derived: all interactive firmware controls should be locked while flashing
   const firmwareControlsDisabled = isFlashing || isLoadingDefaults;
 
+  // Local firmwares shown in the "Local Firmwares" sidebar should exclude the
+  // bootloader/partition-table helper files — they aren't standalone app images.
+  const displayedLocalFirmwares = localFirmwares.filter(
+    f => f.type !== 'bootloader' && f.type !== 'partition-table'
+  );
+
   return (
-    <div className="h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-4 overflow-y-auto">
+    <div className="h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 p-4">
       <div className="h-full flex flex-col lg:flex-row gap-4 max-w-8xl mx-auto">
         {/* Main Content - Left Side */}
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 gap-4 ">
-          <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 flex-1 flex flex-col flex-shrink-0">
+          <div className="bg-gray-800 rounded-2xl shadow-2xl p-6 border border-gray-700 flex-1 flex flex-col min-h-0">
             {/* Header */}
             <div className="mb-2">
               <h1 className="text-lg xl:text-3xl font-bold text-white ">Neuro PlayGround (NPG) Lite Firmware Flasher</h1>
@@ -907,7 +1056,7 @@ export default function ESP32Flasher() {
             </div>
 
             {/* Firmware Section */}
-            <div className="firmware-selection flex-1 flex flex-col">
+            <div className="firmware-selection flex-1 flex flex-col overflow-y-auto min-h-0 custom-scrollbar pr-1">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
                 <h2 className="text-lg font-semibold text-white">Firmware Binary</h2>
                 <div className="flex gap-2">
@@ -962,13 +1111,12 @@ export default function ESP32Flasher() {
                     <button
                       onClick={() => loadDefaultFirmware('ble')}
                       disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'ble'}
-                      className={`p-3 rounded-lg border transition-colors ${
-                        selectedDefaultFirmware === 'ble'
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'ble'
                           ? 'bg-blue-600 border-blue-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                      }`}
+                        }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -988,13 +1136,12 @@ export default function ESP32Flasher() {
                     <button
                       onClick={() => loadDefaultFirmware('wifi')}
                       disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'wifi'}
-                      className={`p-3 rounded-lg border transition-colors ${
-                        selectedDefaultFirmware === 'wifi'
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'wifi'
                           ? 'bg-green-600 border-green-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                      }`}
+                        }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -1014,13 +1161,12 @@ export default function ESP32Flasher() {
                     <button
                       onClick={() => loadDefaultFirmware('serial')}
                       disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'serial'}
-                      className={`p-3 rounded-lg border transition-colors ${
-                        selectedDefaultFirmware === 'serial'
+                      className={`p-3 rounded-lg border transition-colors ${selectedDefaultFirmware === 'serial'
                           ? 'bg-purple-600 border-purple-500 cursor-default'
                           : firmwareControlsDisabled
                             ? 'bg-gray-800 border-gray-700 cursor-not-allowed opacity-50'
                             : 'bg-gray-900 border-gray-600 hover:bg-gray-700'
-                      }`}
+                        }`}
                     >
                       <div className="flex flex-col items-center gap-1">
                         {isLoadingDefaults ? (
@@ -1041,10 +1187,10 @@ export default function ESP32Flasher() {
                   </p>
                 </div>
 
-                {/* Selected Firmware Display */}
+                {/* Selected Firmware Display (this is the App file — required in both modes) */}
                 <div className="selected-firmware-display">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Selected Firmware
+                    {flashFullFirmware ? 'App Firmware (required)' : 'Selected Firmware'}
                   </label>
                   {firmwareFile ? (
                     <div className="p-3 bg-gray-900 rounded-lg border border-green-500">
@@ -1087,12 +1233,113 @@ export default function ESP32Flasher() {
                   )}
                 </div>
 
+                <div className="full-flash-option flex items-start gap-3 p-3 bg-gray-900 rounded-lg border border-gray-700">
+                  <div className="relative flex items-center mt-0.5">
+                    <input
+                      type="checkbox"
+                      id="flashFullFirmware"
+                      checked={flashFullFirmware}
+                      onChange={(e) => setFlashFullFirmware(e.target.checked)}
+                      disabled={isFlashing}
+                      className="peer appearance-none h-5 w-5 shrink-0 rounded-md border-2 border-gray-500 bg-gray-800 
+                 checked:bg-green-600 checked:border-green-600 
+                 hover:border-gray-400 
+                 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-900
+                 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gray-500
+                 transition-colors duration-150 cursor-pointer"
+                    />
+                    {/* checkmark, only visible when checked */}
+                    <svg
+                      className="pointer-events-none absolute h-3.5 w-3.5 left-[3px] top-[3px] text-white opacity-0 peer-checked:opacity-100 transition-opacity"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={3}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+
+                  <label htmlFor="flashFullFirmware" className="text-sm text-gray-300 cursor-pointer">
+                    <span className="font-medium text-white">Flash complete firmware</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">
+                      Writes bootloader + partition table + app. Use this for a new/blank chip or to recover a device
+                      that won&apos;t boot. Off by default — normal updates only need the app.
+                    </span>
+                  </label>
+                </div>
+                {/* Mandatory bootloader + partition table selection — chosen from
+                    Local Firmwares (added only via "Add Firmware" or the
+                    default auto-downloads). Only shown/required in full-flash mode. */}
+                {flashFullFirmware && (
+                  <div className="full-flash-required-files space-y-3">
+                    {/* Bootloader selector */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Bootloader (required)
+                      </label>
+                      <select
+                        value={bootloaderFile?.name || ''}
+                        onChange={(e) => loadBootloaderFromStorage(e.target.value)}
+                        disabled={isFlashing}
+                        className={`w-full px-3 py-2 bg-gray-900 text-white rounded-lg border text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${bootloaderFile ? 'border-green-500' : 'border-yellow-600'
+                          }`}
+                      >
+                        <option value=""> Select from Local Firmwares </option>
+                        {localFirmwares.map((f) => (
+                          <option key={f.name} value={f.name}>
+                            {f.name} ({(f.size / 1024).toFixed(1)} KB)
+                          </option>
+                        ))}
+                      </select>
+                      {bootloaderFile && (
+                        <p className="text-xs text-green-400 mt-1">
+                          ✓ {bootloaderFile.name} ({(bootloaderFile.size / 1024).toFixed(2)} KB)
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Partition table selector */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Partition Table (required)
+                      </label>
+                      <select
+                        value={partitionTableFile?.name || ''}
+                        onChange={(e) => loadPartitionTableFromStorage(e.target.value)}
+                        disabled={isFlashing}
+                        className={`w-full px-3 py-2 bg-gray-900 text-white rounded-lg border text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${partitionTableFile ? 'border-green-500' : 'border-yellow-600'
+                          }`}
+                      >
+                        <option value=""> Select from Local Firmwares </option>
+                        {localFirmwares.map((f) => (
+                          <option key={f.name} value={f.name}>
+                            {f.name} ({(f.size / 1024).toFixed(1)} KB)
+                          </option>
+                        ))}
+                      </select>
+                      {partitionTableFile && (
+                        <p className="text-xs text-green-400 mt-1">
+                          ✓ {partitionTableFile.name} ({(partitionTableFile.size / 1024).toFixed(2)} KB)
+                        </p>
+                      )}
+                    </div>
+
+                    {(!bootloaderFile || !partitionTableFile || !firmwareFile) && (
+                      <p className="text-xs text-yellow-400">
+                        All three (bootloader, partition table, app) must be selected before flashing. Don&apos;t see the
+                        file you need? Add it first with the &quot;Add Firmware&quot; button above.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Advanced Options - Now as popup */}
                 <div className="flash-address-section relative">
                   <button
                     ref={advancedButtonRef}
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    disabled={isFlashing}
+                    disabled={isFlashing || flashFullFirmware}
                     className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <svg
@@ -1106,7 +1353,7 @@ export default function ESP32Flasher() {
                     Advanced Option
                   </button>
 
-                  {showAdvanced && !isFlashing && (
+                  {showAdvanced && !isFlashing && !flashFullFirmware && (
                     <div className="advanced-popup absolute bottom-full left-0 mb-2 z-10 w-80 p-4 bg-gray-800 rounded-lg border border-gray-600 shadow-xl">
                       <label className="block text-sm font-medium text-gray-300 mb-2">
                         Flash Address (hex)
@@ -1123,7 +1370,8 @@ export default function ESP32Flasher() {
                         Default: 0x10000 (application partition)
                       </p>
                       <p className="mt-1 text-xs text-gray-500">
-                        Change only if you know what you&apos;re doing
+                        Change only if you know what you&apos;re doing. Addresses below 0x9000 are blocked here —
+                        use &quot;Flash complete firmware&quot; instead if you need to write the bootloader/partition table.
                       </p>
                     </div>
                   )}
@@ -1132,10 +1380,16 @@ export default function ESP32Flasher() {
                 {/* Flash Button */}
                 <button
                   onClick={flashFirmware}
-                  disabled={!isConnected || isFlashing || !firmwareFile}
+                  disabled={
+                    !isConnected ||
+                    isFlashing ||
+                    (flashFullFirmware
+                      ? !bootloaderFile || !partitionTableFile || !firmwareFile
+                      : !firmwareFile)
+                  }
                   className="flash-button w-full px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
                 >
-                  {isFlashing ? 'Flashing...' : 'Flash Firmware'}
+                  {isFlashing ? 'Flashing...' : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware'}
                 </button>
               </div>
               {/* Progress Bar */}
@@ -1167,7 +1421,7 @@ export default function ESP32Flasher() {
                     Clear
                   </button>
                 </div>
-                <div className="bg-black rounded-lg p-3 flex-1 overflow-y-auto font-mono text-sm min-h-0">
+                <div className="bg-black rounded-lg p-3 flex-1 overflow-y-auto font-mono text-sm min-h-0 custom-scrollbar">
                   {logs.map((log, index) => (
                     <div
                       key={index}
@@ -1189,9 +1443,9 @@ export default function ESP32Flasher() {
                 <h2 className="text-xl font-semibold text-white">Local Firmwares</h2>
                 <div className="flex gap-2">
                   <span className="px-2 py-1 bg-blue-600 text-white rounded text-xs">
-                    {localFirmwares.length}
+                    {displayedLocalFirmwares.length}
                   </span>
-                  {localFirmwares.some(f => !f.isDefault) && (
+                  {displayedLocalFirmwares.some(f => !f.isDefault) && (
                     <button
                       onClick={clearAllFirmwares}
                       disabled={isFlashing}
@@ -1204,13 +1458,13 @@ export default function ESP32Flasher() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto custom-scrollbar">
                 {isLoadingDefaults ? (
                   <div className="text-center py-8">
                     <Loader2 className="h-8 w-8 text-blue-500 mx-auto mb-3 animate-spin" />
                     <p className="text-gray-400 text-sm">Loading default firmwares...</p>
                   </div>
-                ) : localFirmwares.length === 0 ? (
+                ) : displayedLocalFirmwares.length === 0 ? (
                   <div className="text-center py-8">
                     <svg className="h-12 w-12 text-gray-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1220,7 +1474,7 @@ export default function ESP32Flasher() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {localFirmwares.map((firmware, index) => {
+                    {displayedLocalFirmwares.map((firmware, index) => {
                       const isDefault = firmware.isDefault;
                       const typeClass = isDefault ? {
                         ble: 'bg-blue-600',
@@ -1383,7 +1637,7 @@ export default function ESP32Flasher() {
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1">
+            <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
               {githubFirmwares.length === 0 ? (
                 <div className="text-center py-8">
                   <p className="text-gray-400 mb-4">No firmware files found in the latest release.</p>
