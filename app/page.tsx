@@ -11,7 +11,7 @@ const DB_VERSION = 2;
 const STORE_NAME = 'firmwares';
 
 // Cloudflare Worker proxy URL
-const CLOUDFLARE_WORKER_URL = 'https://small-scene-7ad3.amanmaheshwari715.workers.dev/';
+const CLOUDFLARE_WORKER_URL = 'https://npg-lite-web-flasher.myupsidedownlab.workers.dev/';
 
 // Default firmware files
 interface DefaultFirmware {
@@ -325,7 +325,7 @@ export default function ESP32Flasher() {
   const espLoaderRef = useRef<ExtendedESPLoader | null>(null);
   const serialPortRef = useRef<SerialPort | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const githubRepo = 'amanmahe/npg-lite-firmware';
+  const githubRepo = 'upsidedownlabs/npg-lite-firmware';
   const lastLogRef = useRef<HTMLDivElement>(null);
   const advancedButtonRef = useRef<HTMLButtonElement>(null);
 
