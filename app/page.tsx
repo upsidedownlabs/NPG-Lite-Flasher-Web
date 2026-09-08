@@ -11,52 +11,46 @@ const DB_VERSION = 2;
 const STORE_NAME = 'firmwares';
 
 // Cloudflare Worker proxy URL
-const CLOUDFLARE_WORKER_URL = 'https://npg-lite-web-flasher.myupsidedownlab.workers.dev/';
+const CLOUDFLARE_WORKER_URL = 'https://small-scene-7ad3.amanmaheshwari715.workers.dev/';
 
 // Default firmware files
 interface DefaultFirmware {
   name: string;
   description: string;
   url: string;
-  type: 'ble' | 'wifi' | 'serial' | 'bootloader' | 'partition-table';
+  type: 'ble' | 'wifi' | 'serial';
 }
 
 const DEFAULT_FIRMWARES: DefaultFirmware[] = [
   {
-    name: 'npg-lite-ble.bin',
+    name: 'npg-lite-ble.ino.merged.bin',
     description: 'BLE Version - For Bluetooth Low Energy communication',
-    url: './firmwares/NPG-LITE-BLE.ino.bin',
+    url: './firmwares/NPG-LITE-BLE.ino.merged.bin',
     type: 'ble'
   },
   {
-    name: 'npg-lite-wifi.bin',
+    name: 'npg-lite-wifi.ino.merged.bin',
     description: 'WiFi Version - For WiFi communication',
-    url: './firmwares/NPG-LITE-WiFi.ino.bin',
+    url: './firmwares/NPG-LITE-WiFi.ino.merged.bin',
     type: 'wifi'
   },
   {
-    name: 'npg-lite-serial.bin',
+    name: 'npg-lite-serial.ino.merged.bin',
     description: 'Serial Version - For direct serial communication',
-    url: './firmwares/NPG-LITE.ino.bin',
+    url: './firmwares/NPG-LITE.ino.merged.bin',
     type: 'serial'
-  },
-  {
-    name: 'bootloader.bin',
-    description: 'Bootloader - required for full/recovery flash',
-    url: './firmwares/bootloader.bin',
-    type: 'bootloader'
-  },
-  {
-    name: 'partition-table.bin',
-    description: 'Partition table - required for full/recovery flash',
-    url: './firmwares/partition-table.bin',
-    type: 'partition-table'
   }
+  // No default bootloader.bin / partition-table.bin here on purpose: projects
+  // now ship a single merged image (bootloader + partitions + app combined),
+  // so there's nothing to pre-bundle for full-flash mode anymore. Bootloader/
+  // partition files for the "Flash complete firmware" recovery path are added
+  // manually via "Add Firmware" only when actually needed.
 ];
 
-// Types that should never be user-deletable and never shown in the
-// selectable "app firmware" pickers (they are flashing components, not apps)
-const DEFAULT_TYPES = ['ble', 'wifi', 'serial', 'bootloader', 'partition-table'];
+// Filenames of firmwares shipped with the app itself - these can never be
+// deleted by the user, regardless of their "type" tag. Matching by name
+// (not type) means per-project bootloader/partition files that happen to
+// share a type with the two genuine defaults are still deletable normally.
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -190,7 +184,12 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         size: item.size,
         timestamp: item.timestamp,
         type: item.type,
-        isDefault: item.type && DEFAULT_TYPES.includes(item.type) ? true : undefined
+        // Match by exact filename against the app-shipped defaults, not by
+        // type. Matching by type alone incorrectly protects every bootloader/
+        // partition-table file with that type - including per-project ones
+        // saved under the same generic type - leaving them permanently
+        // undeletable with no error or explanation.
+        isDefault: DEFAULT_FIRMWARES.some(d => d.name === item.name) ? true : undefined
       }));
 
       resolve(firmwares);
@@ -216,7 +215,9 @@ interface ExtendedESPLoader extends ESPLoader {
 }
 
 interface GithubFirmware {
+  /** Project name, e.g. "Protobot_armband" (".ino.merged.bin" suffix stripped) */
   name: string;
+  /** Download URL for the project's merged.bin */
   url: string;
 }
 
@@ -232,7 +233,67 @@ interface GithubRelease {
 // Fixed offsets used when flashing the complete firmware set
 const BOOTLOADER_ADDRESS = 0x0;
 const PARTITION_TABLE_ADDRESS = 0x8000;
+const OTADATA_ADDRESS = 0xe000;
 const APP_ADDRESS = 0x10000;
+
+// The Arduino IDE's own upload flow (and esp32-arduino's esptool wrapper)
+// always writes a small "boot_app0.bin" to the otadata partition (0xe000)
+// alongside bootloader/partitions/app. It tells the 2nd-stage bootloader
+// which OTA slot to boot (ota_0). Skipping this write is harmless on a
+// completely blank chip (blank otadata defaults to ota_0), but if the chip
+// previously ran *any* other firmware, stale/garbage bytes can be left in
+// that region - the bootloader then fails to resolve a valid OTA slot and
+// the board resets in a loop. This binary is identical for every project
+// built with the standard "default" ESP32 partition scheme (8KB, fixed
+// content), so it's embedded here rather than needing to ship it per-project.
+const BOOT_APP0_BASE64 = 'AQAAAP///////////////////////////////5qYQ0f//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////wAAAAD///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=';
+
+
+// Common suffixes emitted by arduino-cli --export-binaries. Used to pick a
+// sensible default flash address for a firmware file the moment it's
+// selected as "the App Firmware", and to explain that choice to the user.
+type AddressKind = 'merged' | 'bootloader' | 'partition' | 'app';
+
+interface DetectedAddress {
+  kind: AddressKind;
+  address: string;
+  /** Plain-language explanation shown to the user for why this address was picked */
+  reason: string;
+}
+
+const detectAddressForFilename = (name: string): DetectedAddress => {
+  const lower = name.toLowerCase();
+
+  if (lower.includes('merged')) {
+    return {
+      kind: 'merged',
+      address: '0x0',
+      reason: 'This is a merged image - bootloader, partition table, OTA data, and app are already combined into one file at their correct offsets. It must be written starting at 0x0 so every part lands in the right place.',
+    };
+  }
+
+  if (lower.includes('bootloader')) {
+    return {
+      kind: 'bootloader',
+      address: '0x0',
+      reason: 'This is a bootloader binary. On ESP32 boards it always belongs at 0x0, the very start of flash.',
+    };
+  }
+
+  if (lower.includes('partition')) {
+    return {
+      kind: 'partition',
+      address: '0x8000',
+      reason: 'This is a partition table binary. It always belongs at 0x8000.',
+    };
+  }
+
+  return {
+    kind: 'app',
+    address: '0x10000',
+    reason: 'This looks like an app-only binary (not a merged image). It belongs at 0x10000, the start of the app partition - writing it anywhere else would overwrite the bootloader/partition table region or miss the app slot entirely.',
+  };
+};
 
 export default function ESP32Flasher() {
   const [isConnected, setIsConnected] = useState(false);
@@ -242,10 +303,11 @@ export default function ESP32Flasher() {
   const [firmwareFile, setFirmwareFile] = useState<File | null>(null);
   const [chipInfo, setChipInfo] = useState<string>('');
   const [flashAddress, setFlashAddress] = useState<string>('0x10000');
+  const [addressAutoReason, setAddressAutoReason] = useState<string>('');
   const [flashFullFirmware, setFlashFullFirmware] = useState(false);
   // Explicit, mandatory selections for full-flash mode. All three must be
   // set by the user (or picked from Local Firmwares) before flashing is
-  // allowed — nothing is auto-guessed by filename.
+  // allowed - nothing is auto-guessed by filename.
   const [bootloaderFile, setBootloaderFile] = useState<File | null>(null);
   const [partitionTableFile, setPartitionTableFile] = useState<File | null>(null);
   const [showGithubDialog, setShowGithubDialog] = useState(false);
@@ -263,7 +325,7 @@ export default function ESP32Flasher() {
   const espLoaderRef = useRef<ExtendedESPLoader | null>(null);
   const serialPortRef = useRef<SerialPort | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const githubRepo = 'upsidedownlabs/npg-lite-firmware';
+  const githubRepo = 'amanmahe/npg-lite-firmware';
   const lastLogRef = useRef<HTMLDivElement>(null);
   const advancedButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -276,6 +338,61 @@ export default function ESP32Flasher() {
       lastLogRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs]);
+
+  // Whenever the "App Firmware" file changes, look at its filename and
+  // auto-pick the address it needs - merged images always go at 0x0,
+  // plain app binaries at 0x10000, bootloader/partition files at their own
+  // fixed offsets. This runs regardless of source (pre-built button, GitHub
+  // download, Local Firmwares "Load", or manual "Add Firmware" upload) so
+  // the behavior is consistent everywhere a firmware gets selected.
+  useEffect(() => {
+    if (!firmwareFile) {
+      setAddressAutoReason('');
+      return;
+    }
+    const detected = detectAddressForFilename(firmwareFile.name);
+    setAddressAutoReason(detected.reason);
+    // Full-flash mode ignores flashAddress entirely, so only touch it in
+    // single-file mode - otherwise leave it alone so switching modes back
+    // and forth doesn't fight the user's own edits.
+    if (!flashFullFirmware) {
+      setFlashAddress(detected.address);
+    }
+    // A merged image supersedes the whole 3-file full-flash approach, so
+    // turn that mode off automatically if it was left on from before.
+    if (detected.kind === 'merged' && flashFullFirmware) {
+      setFlashFullFirmware(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firmwareFile]);
+
+  // If the user manually edits the flash address away from what this file's
+  // name implies, confirm with them first - a wrong address here can brick
+  // the device (overwrite the bootloader, land outside the app partition,
+  // etc.), so this isn't a silent "just trust the user typed it" field.
+  const handleFlashAddressBlur = () => {
+    if (!firmwareFile || flashFullFirmware) return;
+
+    const detected = detectAddressForFilename(firmwareFile.name);
+    const typed = flashAddress.trim().toLowerCase();
+    const recommended = detected.address.toLowerCase();
+
+    if (typed === recommended) return;
+
+    const confirmed = window.confirm(
+      `"${firmwareFile.name}" is normally flashed at ${detected.address}.\n\n` +
+      `${detected.reason}\n\n` +
+      `You've set it to ${flashAddress} instead. Writing to the wrong address can corrupt the flash layout ` +
+      `or leave the board unable to boot. Keep ${flashAddress} anyway?`
+    );
+
+    if (!confirmed) {
+      setFlashAddress(detected.address);
+      addLog(`Address reverted to recommended ${detected.address} for ${firmwareFile.name}`);
+    } else {
+      addLog(`⚠ Using custom address ${flashAddress} for ${firmwareFile.name} (recommended: ${detected.address})`);
+    }
+  };
 
   const loadLocalFirmwares = async () => {
     try {
@@ -489,6 +606,8 @@ export default function ESP32Flasher() {
         addLog(`Selected firmware: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
         setShowAddFirmwareDialog(false);
         setSelectedDefaultFirmware('');
+        // Flash address is set automatically based on the filename by the
+        // effect watching firmwareFile (merged → 0x0, app → 0x10000, etc.)
 
         // Save to local storage
         file.arrayBuffer().then(arrayBuffer => {
@@ -512,7 +631,7 @@ export default function ESP32Flasher() {
 
   // ── Selection for the mandatory bootloader / partition-table slots ──
   // These are chosen from Local Firmwares (populated only via "Add Firmware"
-  // or the default auto-downloads) — never a separate upload path.
+  // or the default auto-downloads) - never a separate upload path.
   const loadBootloaderFromStorage = async (name: string) => {
     if (isFlashing) return;
     if (!name) {
@@ -555,6 +674,10 @@ export default function ESP32Flasher() {
   const arrayBufferToBinaryString = (buffer: ArrayBuffer): string =>
     Array.from(new Uint8Array(buffer)).map(b => String.fromCharCode(b)).join('');
 
+  // Decodes the embedded base64 boot_app0 blob straight into the binary-string
+  // format esptool-js expects, without going through an intermediate File.
+  const base64ToBinaryString = (b64: string): string => atob(b64);
+
   const flashFirmware = async () => {
     if (!espLoaderRef.current) {
       addLog('No device connected');
@@ -562,7 +685,7 @@ export default function ESP32Flasher() {
     }
 
     // In full-flash mode, all three files are mandatory and must be
-    // explicitly selected by the user — no auto-lookup, no guessing by name.
+    // explicitly selected by the user - no auto-lookup, no guessing by name.
     if (flashFullFirmware) {
       if (!bootloaderFile || !partitionTableFile || !firmwareFile) {
         addLog('❌ Full flash requires all three files to be selected:');
@@ -596,12 +719,14 @@ export default function ESP32Flasher() {
         fileEntries = [
           { data: arrayBufferToBinaryString(bootloaderBuf), address: BOOTLOADER_ADDRESS },
           { data: arrayBufferToBinaryString(partitionTableBuf), address: PARTITION_TABLE_ADDRESS },
+          { data: base64ToBinaryString(BOOT_APP0_BASE64), address: OTADATA_ADDRESS },
           { data: arrayBufferToBinaryString(appBuf), address: APP_ADDRESS },
         ];
 
-        addLog(`Bootloader: ${bootloaderFile!.name} — ${(bootloaderBuf.byteLength / 1024).toFixed(2)} KB @ 0x0`);
-        addLog(`Partition table: ${partitionTableFile!.name} — ${(partitionTableBuf.byteLength / 1024).toFixed(2)} KB @ 0x8000`);
-        addLog(`App: ${firmwareFile!.name} — ${(appBuf.byteLength / 1024).toFixed(2)} KB @ 0x10000`);
+        addLog(`Bootloader: ${bootloaderFile!.name} - ${(bootloaderBuf.byteLength / 1024).toFixed(2)} KB @ 0x0`);
+        addLog(`Partition table: ${partitionTableFile!.name} - ${(partitionTableBuf.byteLength / 1024).toFixed(2)} KB @ 0x8000`);
+        addLog(`OTA selector: boot_app0.bin - 8.00 KB @ 0xe000`);
+        addLog(`App: ${firmwareFile!.name} - ${(appBuf.byteLength / 1024).toFixed(2)} KB @ 0x10000`);
       } else {
         // ── Default behavior: app only, at the configured address ──
         const addrStr = flashAddress.trim();
@@ -614,14 +739,34 @@ export default function ESP32Flasher() {
 
         const address = parseInt(addrStr, 16);
 
+        // A "*.ino.merged.bin" (arduino-cli --export-binaries output) is a
+        // single pre-combined image that already contains the bootloader,
+        // partition table, otadata, and app laid out at their correct
+        // absolute offsets, sized to the full flash - it's meant to be
+        // written whole starting at 0x0. The overlap guard below exists to
+        // stop an *app-only* binary from accidentally overwriting the
+        // bootloader/partition-table region, so it must not apply here.
+        const isMergedImage = /merged/i.test(firmwareFile!.name);
+
+        if (isMergedImage && address !== 0x0) {
+          addLog(`❌ "${firmwareFile!.name}" is a merged image and must be flashed at 0x0.`);
+          addLog(`   Set the flash address to 0x0, or reload it - merged images auto-set this.`);
+          setIsFlashing(false);
+          return;
+        }
+
         // Guard against accidentally overwriting the bootloader/partition
         // table region when only flashing a single app binary.
-        if (address < PARTITION_TABLE_ADDRESS + 0x1000) {
+        if (!isMergedImage && address < PARTITION_TABLE_ADDRESS + 0x1000) {
           addLog('❌ This address overlaps the bootloader/partition table region.');
           addLog('   Enable "Flash complete firmware" to write all components safely,');
           addLog('   or use an address of 0x10000 or higher for app-only flashing.');
           setIsFlashing(false);
           return;
+        }
+
+        if (isMergedImage) {
+          addLog(`Merged image detected: writing whole image @ 0x0 (bootloader + partition table + app included)`);
         }
 
         const arrayBuffer = await firmwareFile!.arrayBuffer();
@@ -640,7 +785,7 @@ export default function ESP32Flasher() {
 
       // Byte-weighted progress tracking. esptool-js's reportProgress gives a
       // (fileIndex, written, total) triple where written/total is the
-      // *current file's own* completion fraction — not a global one. Since
+      // *current file's own* completion fraction - not a global one. Since
       // the bootloader/partition-table/app files can differ hugely in size
       // (the app is typically much larger), weighting every file as an
       // equal 1/N share of the bar makes progress jump through small files
@@ -820,14 +965,14 @@ export default function ESP32Flasher() {
 
       const assets = releasesData.assets || [];
       const firmwares = assets
-        .filter((asset: GithubAsset) => asset.name.endsWith('.bin'))
+        .filter((asset: GithubAsset) => /\.ino\.merged\.bin$/i.test(asset.name))
         .map((asset: GithubAsset) => ({
-          name: asset.name,
+          name: asset.name.replace(/\.ino\.merged\.bin$/i, ''),
           url: asset.browser_download_url,
         }));
 
       if (firmwares.length === 0) {
-        addLog('⚠ No .bin files found in the latest release');
+        addLog('⚠ No merged firmware images (*.ino.merged.bin) found in the latest release');
         return;
       }
 
@@ -847,12 +992,36 @@ export default function ESP32Flasher() {
     }
   };
 
-  // Download function using Cloudflare Worker proxy
+  // The merged filename a given project's release asset is stored under locally
+  const mergedFileName = (projectName: string) => `${projectName}.ino.merged.bin`;
+
+  // Download a project's merged.bin via the Cloudflare Worker proxy and select
+  // it for flashing. A merged image already contains bootloader + partition
+  // table + otadata + app at their correct absolute offsets, so it's saved and
+  // flashed as a single file at 0x0 - no extraction or multi-file wiring needed.
   const downloadGithubFirmware = async (url: string, name: string) => {
     setDownloadingFirmware(name);
     setDownloadProgress('Initializing...');
     try {
-      addLog(`Downloading ${name}...`);
+      const fileName = mergedFileName(name);
+
+      // Reuse the cached copy if this project was already downloaded before
+      const alreadyCached = localFirmwares.some(f => f.name === fileName);
+      if (alreadyCached) {
+        addLog(`${fileName} already in storage - loading cached copy...`);
+        const cachedBuf = await getFirmwareFromDB(fileName);
+        if (cachedBuf) {
+          setFirmwareFile(new File([cachedBuf], fileName, { type: 'application/octet-stream' }));
+          setSelectedDefaultFirmware('');
+          setShowGithubDialog(false);
+          addLog(`✓ Loaded cached ${fileName} (${(cachedBuf.byteLength / 1024).toFixed(2)} KB)`);
+          addLog(`✓ Merged image - flash address set to 0x0. Click "Flash Firmware" when device is connected.`);
+          return;
+        }
+        addLog(`⚠ Cached copy missing/corrupt, re-downloading...`);
+      }
+
+      addLog(`Downloading ${fileName}...`);
 
       const commonHeaders = {
         'Accept': 'application/octet-stream, */*',
@@ -860,7 +1029,6 @@ export default function ESP32Flasher() {
       };
 
       let arrayBuffer: ArrayBuffer | null = null;
-      let successMethod = '';
 
       // Use Cloudflare Worker proxy
       try {
@@ -883,8 +1051,7 @@ export default function ESP32Flasher() {
             arrayBuffer = await response.arrayBuffer();
 
             if (arrayBuffer.byteLength > 1000) {
-              successMethod = 'Cloudflare Worker';
-              addLog(`✓ Download successful via ${successMethod} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+              addLog(`✓ Download successful via Cloudflare Worker (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
             } else {
               addLog(`⚠ Worker: Response too small (${arrayBuffer.byteLength} bytes), may be invalid`);
             }
@@ -898,30 +1065,29 @@ export default function ESP32Flasher() {
       }
 
       if (!arrayBuffer || arrayBuffer.byteLength < 1000) {
-        addLog(`❌ Download failed for ${name}`);
+        addLog(`❌ Download failed for ${fileName}`);
         throw new Error(`Download failed. Please use manual download option.`);
       }
 
       setDownloadProgress('Saving to storage...');
       addLog(`Saving to browser storage...`);
-      await saveFirmwareToDB(name, arrayBuffer);
+      await saveFirmwareToDB(fileName, arrayBuffer);
       await loadLocalFirmwares();
 
-      const file = new File([arrayBuffer], name, { type: 'application/octet-stream' });
-      setFirmwareFile(file);
+      setFirmwareFile(new File([arrayBuffer], fileName, { type: 'application/octet-stream' }));
       setSelectedDefaultFirmware('');
       setShowGithubDialog(false);
-      addLog(`✓ Successfully downloaded and saved ${name}`);
-      addLog(`✓ Ready to flash! Click "Flash Firmware" when device is connected.`);
+
+      addLog(`✓ Successfully downloaded and saved ${fileName} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
+      addLog(`✓ Merged image - flash address set to 0x0. Click "Flash Firmware" when device is connected.`);
 
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       addLog(`❌ Download error: ${errorMsg}`);
       addLog(`\n🚀 Manual Download Instructions:`);
       addLog(`   1. Visit: https://github.com/${githubRepo}/releases/latest`);
-      addLog(`   2. Find and click on "${name}"`);
-      addLog(`   3. Save the .bin file to your computer`);
-      addLog(`   4. Use "Add Firmware" button to upload it`);
+      addLog(`   2. Find and download "${mergedFileName(name)}"`);
+      addLog(`   3. Use "Add Firmware" to upload it - the flasher auto-detects merged images`);
     } finally {
       setDownloadingFirmware(null);
       setDownloadProgress('');
@@ -942,6 +1108,8 @@ export default function ESP32Flasher() {
         // Clear default selection if loading a custom firmware
         const isDefault = DEFAULT_FIRMWARES.some(f => f.name === name);
         setSelectedDefaultFirmware(isDefault ? DEFAULT_FIRMWARES.find(f => f.name === name)?.type || '' : '');
+        // Flash address is set automatically based on the filename by the
+        // effect watching firmwareFile (merged → 0x0, app → 0x10000, etc.)
         addLog(`✓ Loaded ${name} (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
       } else {
         addLog(`❌ Firmware ${name} not found in storage`);
@@ -970,6 +1138,12 @@ export default function ESP32Flasher() {
       if (firmwareFile && firmwareFile.name === name) {
         setFirmwareFile(null);
         setSelectedDefaultFirmware('');
+      }
+      if (bootloaderFile && bootloaderFile.name === name) {
+        setBootloaderFile(null);
+      }
+      if (partitionTableFile && partitionTableFile.name === name) {
+        setPartitionTableFile(null);
       }
     } catch (error: unknown) {
       addLog(`Error deleting firmware: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1012,9 +1186,16 @@ export default function ESP32Flasher() {
   const firmwareControlsDisabled = isFlashing || isLoadingDefaults;
 
   // Local firmwares shown in the "Local Firmwares" sidebar should exclude the
-  // bootloader/partition-table helper files — they aren't standalone app images.
+  // bootloader/partition-table helper files - they aren't standalone app images.
   const displayedLocalFirmwares = localFirmwares.filter(
     f => f.type !== 'bootloader' && f.type !== 'partition-table'
+  );
+
+  // Bootloader/partition-table files are hidden from the main sidebar above,
+  // so custom (non-default) ones need somewhere to be cleaned up - surfaced
+  // in the full-flash section instead, right next to where they're selected.
+  const customBootloaderPartitionFiles = localFirmwares.filter(
+    f => (f.type === 'bootloader' || f.type === 'partition-table') && !f.isDefault
   );
 
   return (
@@ -1187,7 +1368,7 @@ export default function ESP32Flasher() {
                   </p>
                 </div>
 
-                {/* Selected Firmware Display (this is the App file — required in both modes) */}
+                {/* Selected Firmware Display (this is the App file - required in both modes) */}
                 <div className="selected-firmware-display">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     {flashFullFirmware ? 'App Firmware (required)' : 'Selected Firmware'}
@@ -1263,12 +1444,14 @@ export default function ESP32Flasher() {
                   <label htmlFor="flashFullFirmware" className="text-sm text-gray-300 cursor-pointer">
                     <span className="font-medium text-white">Flash complete firmware</span>
                     <span className="block text-xs text-gray-400 mt-0.5">
-                      Writes bootloader + partition table + app. Use this for a new/blank chip or to recover a device
-                      that won&apos;t boot. Off by default — normal updates only need the app.
+                      Writes bootloader + partition table + app from three separate files you provide. Off by
+                      default - normal updates only need the app, and for a new/blank or unbootable chip, flashing
+                      a merged image (see &quot;Get from GitHub&quot;) is simpler since it&apos;s one file, no
+                      manual bootloader/partition selection needed.
                     </span>
                   </label>
                 </div>
-                {/* Mandatory bootloader + partition table selection — chosen from
+                {/* Mandatory bootloader + partition table selection - chosen from
                     Local Firmwares (added only via "Add Firmware" or the
                     default auto-downloads). Only shown/required in full-flash mode. */}
                 {flashFullFirmware && (
@@ -1327,9 +1510,39 @@ export default function ESP32Flasher() {
 
                     {(!bootloaderFile || !partitionTableFile || !firmwareFile) && (
                       <p className="text-xs text-yellow-400">
-                        All three (bootloader, partition table, app) must be selected before flashing. Don&apos;t see the
-                        file you need? Add it first with the &quot;Add Firmware&quot; button above.
+                        All three (bootloader, partition table, app) must be selected before flashing. None of these
+                        are bundled by default - add the ones you need with the &quot;Add Firmware&quot; button above.
                       </p>
+                    )}
+
+                    {/* Bootloader/partition-table files don't appear in the main
+                        Local Firmwares sidebar (they aren't standalone apps), so
+                        this is the only place to clean up old/unwanted ones. */}
+                    {customBootloaderPartitionFiles.length > 0 && (
+                      <div className="mt-2 border-t border-gray-700 pt-3">
+                        <p className="text-xs font-medium text-gray-400 mb-2">
+                          Custom bootloader/partition files ({customBootloaderPartitionFiles.length})
+                        </p>
+                        <div className="space-y-1">
+                          {customBootloaderPartitionFiles.map((f) => (
+                            <div
+                              key={f.name}
+                              className="flex items-center justify-between gap-2 px-2 py-1.5 bg-gray-900 rounded border border-gray-700"
+                            >
+                              <span className="text-xs text-gray-300 truncate">
+                                {f.name} <span className="text-gray-500">({(f.size / 1024).toFixed(1)} KB)</span>
+                              </span>
+                              <button
+                                onClick={() => deleteFirmwareFromStorage(f.name)}
+                                disabled={isFlashing}
+                                className="flex-shrink-0 px-2 py-0.5 bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded text-xs transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1362,16 +1575,25 @@ export default function ESP32Flasher() {
                         type="text"
                         value={flashAddress}
                         onChange={(e) => setFlashAddress(e.target.value)}
+                        onBlur={handleFlashAddressBlur}
                         placeholder="0x10000"
                         className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
                         disabled={isFlashing}
                       />
-                      <p className="mt-2 text-xs text-gray-400">
-                        Default: 0x10000 (application partition)
-                      </p>
+                      {addressAutoReason ? (
+                        <p className="mt-2 text-xs text-blue-300">
+                          Auto-set for &quot;{firmwareFile?.name}&quot;: {addressAutoReason}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-gray-400">
+                          Default: 0x10000 (application partition)
+                        </p>
+                      )}
                       <p className="mt-1 text-xs text-gray-500">
-                        Change only if you know what you&apos;re doing. Addresses below 0x9000 are blocked here —
-                        use &quot;Flash complete firmware&quot; instead if you need to write the bootloader/partition table.
+                        Change only if you know what you&apos;re doing - you&apos;ll be asked to confirm if you edit
+                        this away from the recommended value. Addresses below 0x9000 are blocked here (except for
+                        merged images) - use &quot;Flash complete firmware&quot; instead if you need to write the
+                        bootloader/partition table separately.
                       </p>
                     </div>
                   )}
@@ -1652,7 +1874,7 @@ export default function ESP32Flasher() {
                 <div className="space-y-3">
                   {githubFirmwares.map((firmware, index) => {
                     const isDownloading = downloadingFirmware === firmware.name;
-                    const isInStorage = localFirmwares.some(f => f.name === firmware.name);
+                    const isInStorage = localFirmwares.some(f => f.name === mergedFileName(firmware.name));
 
                     return (
                       <div
@@ -1684,7 +1906,10 @@ export default function ESP32Flasher() {
                                 <p className="text-sm text-blue-400 mt-1">{downloadProgress || 'Downloading...'}</p>
                               )}
                               {isInStorage && !isDownloading && (
-                                <p className="text-sm text-green-400 mt-1">Already in storage</p>
+                                <p className="text-sm text-green-400 mt-1">Merged image already saved (flashes @ 0x0)</p>
+                              )}
+                              {!isInStorage && !isDownloading && (
+                                <p className="text-sm text-gray-500 mt-1">Downloads merged image (bootloader + partitions + app)</p>
                               )}
                             </div>
                           </div>
