@@ -13,31 +13,38 @@ const STORE_NAME = 'firmwares';
 // Cloudflare Worker proxy URL
 const CLOUDFLARE_WORKER_URL = 'https://npg-lite-web-flasher.myupsidedownlab.workers.dev/';
 
+// Pre-built firmwares are pulled from the latest release of this repo.
+const PREBUILT_FIRMWARE_REPO = 'Amanmahe/Chords-Arduino-Firmware';
+
 // Default firmware files
 interface DefaultFirmware {
+  /** Release asset name - also the name it's stored under locally */
   name: string;
   description: string;
-  url: string;
+  /** Copy bundled with the app, used only when GitHub can't be reached */
+  fallbackUrl: string;
   type: 'ble' | 'wifi' | 'serial';
 }
 
+// Every release asset listed here is a full-flash merged image (bootloader +
+// partition table + otadata + app).
 const DEFAULT_FIRMWARES: DefaultFirmware[] = [
   {
-    name: 'npg-lite-ble.ino.merged.bin',
+    name: 'Chords-NPG-LITE-BLE-ESP32C6.merged.bin',
     description: 'BLE Version - For Bluetooth Low Energy communication',
-    url: './firmwares/NPG-LITE-BLE.ino.merged.bin',
+    fallbackUrl: './firmwares/NPG-LITE-BLE.ino.merged.bin',
     type: 'ble'
   },
   {
-    name: 'npg-lite-wifi.ino.merged.bin',
+    name: 'Chords-NPG-LITE-WiFi-ESP32C6.merged.bin',
     description: 'WiFi Version - For WiFi communication',
-    url: './firmwares/NPG-LITE-WiFi.ino.merged.bin',
+    fallbackUrl: './firmwares/NPG-LITE-WiFi.ino.merged.bin',
     type: 'wifi'
   },
   {
-    name: 'npg-lite-serial.ino.merged.bin',
+    name: 'Chords-NPG-LITE-Serial-ESP32C6.merged.bin',
     description: 'Serial Version - For direct serial communication',
-    url: './firmwares/NPG-LITE.ino.merged.bin',
+    fallbackUrl: './firmwares/NPG-LITE.ino.merged.bin',
     type: 'serial'
   }
   // No default bootloader.bin / partition-table.bin here on purpose: projects
@@ -46,6 +53,24 @@ const DEFAULT_FIRMWARES: DefaultFirmware[] = [
   // partition files for the "Flash complete firmware" recovery path are added
   // manually via "Add Firmware" only when actually needed.
 ];
+
+// Names the defaults were previously stored under (bundled copies, then the
+// pre-".merged" release asset names). Removed from storage on startup so they
+// don't linger as "custom" firmwares.
+const LEGACY_DEFAULT_FIRMWARE_NAMES = [
+  'npg-lite-ble.ino.merged.bin',
+  'npg-lite-wifi.ino.merged.bin',
+  'npg-lite-serial.ino.merged.bin',
+  'Chords-NPG-LITE-BLE-ESP32C6.bin',
+  'Chords-NPG-LITE-WiFi-ESP32C6.bin',
+  'Chords-NPG-LITE-ESP32C6.bin',
+];
+
+// Merged images already contain bootloader + partition table, so they're
+// always flashed whole at 0x0 and never need "Flash complete firmware".
+const isMergedImageName = (name: string): boolean =>
+  /merged/i.test(name) ||
+  DEFAULT_FIRMWARES.some(f => f.name.toLowerCase() === name.toLowerCase());
 
 // Filenames of firmwares shipped with the app itself - these can never be
 // deleted by the user, regardless of their "type" tag. Matching by name
@@ -77,7 +102,7 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-const saveFirmwareToDB = async (name: string, data: ArrayBuffer, type?: string): Promise<void> => {
+const saveFirmwareToDB = async (name: string, data: ArrayBuffer, type?: string, version?: string): Promise<void> => {
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
@@ -89,7 +114,8 @@ const saveFirmwareToDB = async (name: string, data: ArrayBuffer, type?: string):
         data,
         timestamp: Date.now(),
         size: data.byteLength,
-        ...(type && { type })
+        ...(type && { type }),
+        ...(version && { version })
       };
 
       const request = store.put(firmware);
@@ -111,7 +137,8 @@ const saveFirmwareToDB = async (name: string, data: ArrayBuffer, type?: string):
           data,
           timestamp: Date.now(),
           size: data.byteLength,
-          ...(type && { type })
+          ...(type && { type }),
+          ...(version && { version })
         };
 
         const request = store.put(firmware);
@@ -159,6 +186,8 @@ interface FirmwareInfo {
   size: number;
   timestamp: number;
   type?: string;
+  /** Release tag a default firmware was downloaded from ("bundled" if offline fallback) */
+  version?: string;
   isDefault?: boolean;
 }
 
@@ -176,6 +205,7 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         size: number;
         timestamp: number;
         type?: string;
+        version?: string;
         data: ArrayBuffer;
       }>;
 
@@ -184,6 +214,7 @@ const getAllFirmwaresFromDB = async (): Promise<FirmwareInfo[]> => {
         size: item.size,
         timestamp: item.timestamp,
         type: item.type,
+        version: item.version,
         // Match by exact filename against the app-shipped defaults, not by
         // type. Matching by type alone incorrectly protects every bootloader/
         // partition-table file with that type - including per-project ones
@@ -264,7 +295,7 @@ interface DetectedAddress {
 const detectAddressForFilename = (name: string): DetectedAddress => {
   const lower = name.toLowerCase();
 
-  if (lower.includes('merged')) {
+  if (isMergedImageName(name)) {
     return {
       kind: 'merged',
       address: '0x0',
@@ -320,6 +351,9 @@ export default function ESP32Flasher() {
   const [localFirmwares, setLocalFirmwares] = useState<FirmwareInfo[]>([]);
   const [selectedDefaultFirmware, setSelectedDefaultFirmware] = useState<string>('');
   const [isLoadingDefaults, setIsLoadingDefaults] = useState(false);
+  const [prebuiltVersion, setPrebuiltVersion] = useState<string>('');
+  const latestPrebuiltTagRef = useRef<Promise<string | null> | null>(null);
+  const ensureDefaultsPromiseRef = useRef<Promise<void> | null>(null);
 
   const transportRef = useRef<Transport | null>(null);
   const espLoaderRef = useRef<ExtendedESPLoader | null>(null);
@@ -406,41 +440,126 @@ export default function ESP32Flasher() {
     }
   };
 
-  const ensureDefaultFirmwares = async () => {
-    setIsLoadingDefaults(true);
-    const existingFirmwares = await getAllFirmwaresFromDB();
-    const existingNames = existingFirmwares.map(f => f.name);
-
-    let loadedCount = 0;
-    for (const firmware of DEFAULT_FIRMWARES) {
-      if (!existingNames.includes(firmware.name)) {
+  // Resolves the latest release tag of the pre-built firmware repo, once per
+  // session. null means GitHub couldn't be reached.
+  const getLatestPrebuiltTag = (): Promise<string | null> => {
+    if (!latestPrebuiltTagRef.current) {
+      latestPrebuiltTagRef.current = (async () => {
         try {
-          addLog(`Loading default ${firmware.type.toUpperCase()} firmware...`);
-          const response = await fetch(firmware.url);
-          if (response.ok) {
-            const arrayBuffer = await response.arrayBuffer();
-            await saveFirmwareToDB(firmware.name, arrayBuffer, firmware.type);
-            addLog(`✓ Added default ${firmware.type.toUpperCase()} firmware to storage`);
-            loadedCount++;
-          } else {
-            addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
-          }
+          const response = await fetch(`https://api.github.com/repos/${PREBUILT_FIRMWARE_REPO}/releases/latest`, {
+            headers: { 'Accept': 'application/vnd.github.v3+json' },
+            signal: AbortSignal.timeout(10000)
+          });
+          if (!response.ok) return null;
+          const release = await response.json() as { tag_name?: string };
+          if (release.tag_name) setPrebuiltVersion(release.tag_name);
+          return release.tag_name ?? null;
         } catch (error) {
-          console.error(`Error loading default firmware ${firmware.name}:`, error);
-          addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
+          console.log('Could not fetch latest pre-built release:', error);
+          return null;
+        }
+      })();
+    }
+    return latestPrebuiltTagRef.current;
+  };
+
+  // Downloads a pre-built firmware from the GitHub release (through the
+  // Cloudflare Worker, since release downloads aren't CORS-enabled), falling
+  // back to the copy bundled with the app if that fails.
+  const fetchDefaultFirmwareData = async (
+    firmware: DefaultFirmware,
+    tag: string | null
+  ): Promise<{ data: ArrayBuffer; version: string } | null> => {
+    const releasePath = tag ? `download/${tag}` : 'latest/download';
+    const assetUrl = `https://github.com/${PREBUILT_FIRMWARE_REPO}/releases/${releasePath}/${firmware.name}`;
+    try {
+      addLog(`Downloading ${firmware.name} from ${PREBUILT_FIRMWARE_REPO} ${tag ?? '(latest)'}...`);
+      const response = await fetch(`${CLOUDFLARE_WORKER_URL}?url=${encodeURIComponent(assetUrl)}`, {
+        signal: AbortSignal.timeout(60000),
+        mode: 'cors'
+      });
+      const contentType = response.headers.get('content-type') || '';
+      if (response.ok && !contentType.includes('text/html')) {
+        const data = await response.arrayBuffer();
+        if (data.byteLength > 1000) {
+          return { data, version: tag ?? 'latest' };
         }
       }
+      addLog(`⚠ GitHub download of ${firmware.name} failed (status ${response.status})`);
+    } catch (error) {
+      console.error(`Error downloading ${firmware.name} from GitHub:`, error);
+      addLog(`⚠ GitHub download of ${firmware.name} failed`);
     }
 
-    // Reload firmwares after adding defaults
-    const updatedFirmwares = await getAllFirmwaresFromDB();
-    setLocalFirmwares(updatedFirmwares);
-
-    if (loadedCount > 0) {
-      addLog(`✓ Loaded ${loadedCount} default firmware(s)`);
+    try {
+      const response = await fetch(firmware.fallbackUrl);
+      if (response.ok) {
+        addLog(`Using bundled ${firmware.type.toUpperCase()} firmware instead`);
+        return { data: await response.arrayBuffer(), version: 'bundled' };
+      }
+    } catch (error) {
+      console.error(`Error loading bundled ${firmware.name}:`, error);
     }
+    return null;
+  };
 
-    setIsLoadingDefaults(false);
+  const ensureDefaultFirmwares = () => {
+    // loadLocalFirmwares() calls this after every save; share one run
+    // instead of starting overlapping downloads.
+    if (!ensureDefaultsPromiseRef.current) {
+      ensureDefaultsPromiseRef.current = runEnsureDefaultFirmwares().finally(() => {
+        ensureDefaultsPromiseRef.current = null;
+      });
+    }
+    return ensureDefaultsPromiseRef.current;
+  };
+
+  const runEnsureDefaultFirmwares = async () => {
+    setIsLoadingDefaults(true);
+    try {
+      let existingFirmwares = await getAllFirmwaresFromDB();
+
+      const legacy = existingFirmwares.filter(f => LEGACY_DEFAULT_FIRMWARE_NAMES.includes(f.name));
+      for (const f of legacy) {
+        await deleteFirmwareFromDB(f.name);
+      }
+      if (legacy.length > 0) {
+        existingFirmwares = await getAllFirmwaresFromDB();
+      }
+
+      const latestTag = await getLatestPrebuiltTag();
+
+      let loadedCount = 0;
+      for (const firmware of DEFAULT_FIRMWARES) {
+        const existing = existingFirmwares.find(f => f.name === firmware.name);
+        // Offline (no tag): keep whatever is stored. Online: refresh anything
+        // not downloaded from the latest release.
+        const isStale = !!existing && !!latestTag && existing.version !== latestTag;
+        if (existing && !isStale) continue;
+
+        addLog(isStale
+          ? `New pre-built release ${latestTag} available - updating ${firmware.type.toUpperCase()} firmware...`
+          : `Loading default ${firmware.type.toUpperCase()} firmware...`);
+        const result = await fetchDefaultFirmwareData(firmware, latestTag);
+        if (!result) {
+          addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
+          continue;
+        }
+        // Don't replace a stored copy with the older bundled one
+        if (existing && result.version === 'bundled') continue;
+        await saveFirmwareToDB(firmware.name, result.data, firmware.type, result.version);
+        addLog(`✓ Saved ${firmware.name} (${result.version}, ${(result.data.byteLength / 1024).toFixed(2)} KB)`);
+        loadedCount++;
+      }
+
+      setLocalFirmwares(await getAllFirmwaresFromDB());
+
+      if (loadedCount > 0) {
+        addLog(`✓ Loaded ${loadedCount} default firmware(s)`);
+      }
+    } finally {
+      setIsLoadingDefaults(false);
+    }
   };
 
   const loadDefaultFirmware = async (type: 'ble' | 'wifi' | 'serial') => {
@@ -466,13 +585,12 @@ export default function ESP32Flasher() {
         }
       } else {
         // Download and save
-        addLog(`Downloading ${firmwareInfo.type.toUpperCase()} firmware...`);
-        const response = await fetch(firmwareInfo.url);
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
+        const result = await fetchDefaultFirmwareData(firmwareInfo, await getLatestPrebuiltTag());
+        if (result) {
+          const arrayBuffer = result.data;
           const file = new File([arrayBuffer], firmwareInfo.name, { type: 'application/octet-stream' });
           setFirmwareFile(file);
-          await saveFirmwareToDB(firmwareInfo.name, arrayBuffer, firmwareInfo.type);
+          await saveFirmwareToDB(firmwareInfo.name, arrayBuffer, firmwareInfo.type, result.version);
           await loadLocalFirmwares();
           addLog(`✓ Downloaded and selected ${firmwareInfo.type.toUpperCase()} firmware (${(arrayBuffer.byteLength / 1024).toFixed(2)} KB)`);
         } else {
@@ -746,7 +864,7 @@ export default function ESP32Flasher() {
         // written whole starting at 0x0. The overlap guard below exists to
         // stop an *app-only* binary from accidentally overwriting the
         // bootloader/partition-table region, so it must not apply here.
-        const isMergedImage = /merged/i.test(firmwareFile!.name);
+        const isMergedImage = isMergedImageName(firmwareFile!.name);
 
         if (isMergedImage && address !== 0x0) {
           addLog(`❌ "${firmwareFile!.name}" is a merged image and must be flashed at 0x0.`);
@@ -1185,6 +1303,8 @@ export default function ESP32Flasher() {
   // Derived: all interactive firmware controls should be locked while flashing
   const firmwareControlsDisabled = isFlashing || isLoadingDefaults;
 
+  const selectedIsMergedImage = !!firmwareFile && isMergedImageName(firmwareFile.name);
+
   // Local firmwares shown in the "Local Firmwares" sidebar should exclude the
   // bootloader/partition-table helper files - they aren't standalone app images.
   const displayedLocalFirmwares = localFirmwares.filter(
@@ -1281,6 +1401,9 @@ export default function ESP32Flasher() {
                 <div className="default-firmwares-section">
                   <label className="block text-sm font-medium text-gray-300 mb-2">
                     Pre-built Firmwares
+                    {prebuiltVersion && (
+                      <span className="ml-2 text-xs text-gray-400 font-normal">({prebuiltVersion})</span>
+                    )}
                     {isFlashing && (
                       <span className="ml-2 text-xs text-yellow-400 font-normal">
                         (locked during flash)
@@ -1364,7 +1487,8 @@ export default function ESP32Flasher() {
                     </button>
                   </div>
                   <p className="text-xs text-gray-400 mb-4">
-                    Select a pre-built firmware version. These will be automatically downloaded and stored locally.
+                    Select a pre-built firmware version. These are downloaded from the latest release of{' '}
+                    {PREBUILT_FIRMWARE_REPO} and stored locally.
                   </p>
                 </div>
 
@@ -1421,7 +1545,7 @@ export default function ESP32Flasher() {
                       id="flashFullFirmware"
                       checked={flashFullFirmware}
                       onChange={(e) => setFlashFullFirmware(e.target.checked)}
-                      disabled={isFlashing}
+                      disabled={isFlashing || selectedIsMergedImage}
                       className="peer appearance-none h-5 w-5 shrink-0 rounded-md border-2 border-gray-500 bg-gray-800 
                  checked:bg-green-600 checked:border-green-600 
                  hover:border-gray-400 
@@ -1441,14 +1565,24 @@ export default function ESP32Flasher() {
                     </svg>
                   </div>
 
-                  <label htmlFor="flashFullFirmware" className="text-sm text-gray-300 cursor-pointer">
+                  <label
+                    htmlFor="flashFullFirmware"
+                    className={`text-sm text-gray-300 ${selectedIsMergedImage ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+                  >
                     <span className="font-medium text-white">Flash complete firmware</span>
-                    <span className="block text-xs text-gray-400 mt-0.5">
-                      Writes bootloader + partition table + app from three separate files you provide. Off by
-                      default - normal updates only need the app, and for a new/blank or unbootable chip, flashing
-                      a merged image (see &quot;Get from GitHub&quot;) is simpler since it&apos;s one file, no
-                      manual bootloader/partition selection needed.
-                    </span>
+                    {selectedIsMergedImage ? (
+                      <span className="block text-xs text-blue-300 mt-0.5">
+                        Not needed for &quot;{firmwareFile?.name}&quot; - it&apos;s a merged image that already
+                        contains the bootloader and partition table, so it&apos;s flashed as one file at 0x0.
+                      </span>
+                    ) : (
+                      <span className="block text-xs text-gray-400 mt-0.5">
+                        Writes bootloader + partition table + app from three separate files you provide. Off by
+                        default - normal updates only need the app, and for a new/blank or unbootable chip, flashing
+                        a merged image (see &quot;Get from GitHub&quot;) is simpler since it&apos;s one file, no
+                        manual bootloader/partition selection needed.
+                      </span>
+                    )}
                   </label>
                 </div>
                 {/* Mandatory bootloader + partition table selection - chosen from
