@@ -10,19 +10,44 @@ const DB_NAME = 'ESP32FlasherDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'firmwares';
 
-// Cloudflare Worker proxy URL
-const CLOUDFLARE_WORKER_URL = 'https://npg-lite-web-flasher.myupsidedownlab.workers.dev/';
+// A GitHub repo whose releases are served by its own Cloudflare Worker proxy
+// (GitHub release downloads have no CORS headers). Each Worker serves one repo
+// at /latest and /firmware/<tag|latest>/<file>.
+interface FirmwareSource {
+  repo: string;
+  worker: string;
+}
+
+// Built-in BLE/WiFi/Serial firmwares
+const PREBUILT_SOURCE: FirmwareSource = {
+  repo: 'upsidedownlabs/Chords-Arduino-Firmware',
+  worker: 'https://chords-arduino-firmware.myupsidedownlab.workers.dev',
+};
+
+// NPG Lite project firmwares
+const NPG_LITE_SOURCE: FirmwareSource = {
+  repo: 'upsidedownlabs/NPG-Lite-Arduino-Firmware',
+  worker: 'https://npg-flasher-web.amanmaheshwari715.workers.dev',
+};
+
+// Worker URL that serves one release asset (tag may be "latest")
+const workerFirmwareUrl = (source: FirmwareSource, tag: string, file: string) =>
+  `${source.worker}/firmware/${encodeURIComponent(tag)}/${encodeURIComponent(file)}`;
+
+interface LatestRelease {
+  tag: string;
+  /** null when the tag is known but the asset list couldn't be fetched */
+  assets: { name: string; url: string }[] | null;
+}
 
 // Pre-built firmwares are pulled from the latest release of this repo.
-const PREBUILT_FIRMWARE_REPO = 'Amanmahe/Chords-Arduino-Firmware';
+const PREBUILT_FIRMWARE_REPO = PREBUILT_SOURCE.repo;
 
 // Default firmware files
 interface DefaultFirmware {
   /** Release asset name - also the name it's stored under locally */
   name: string;
   description: string;
-  /** Copy bundled with the app, used only when GitHub can't be reached */
-  fallbackUrl: string;
   type: 'ble' | 'wifi' | 'serial';
 }
 
@@ -32,19 +57,16 @@ const DEFAULT_FIRMWARES: DefaultFirmware[] = [
   {
     name: 'Chords-NPG-LITE-BLE-ESP32C6.merged.bin',
     description: 'BLE Version - For Bluetooth Low Energy communication',
-    fallbackUrl: './firmwares/NPG-LITE-BLE.ino.merged.bin',
     type: 'ble'
   },
   {
     name: 'Chords-NPG-LITE-WiFi-ESP32C6.merged.bin',
     description: 'WiFi Version - For WiFi communication',
-    fallbackUrl: './firmwares/NPG-LITE-WiFi.ino.merged.bin',
     type: 'wifi'
   },
   {
     name: 'Chords-NPG-LITE-Serial-ESP32C6.merged.bin',
     description: 'Serial Version - For direct serial communication',
-    fallbackUrl: './firmwares/NPG-LITE.ino.merged.bin',
     type: 'serial'
   }
   // No default bootloader.bin / partition-table.bin here on purpose: projects
@@ -186,7 +208,7 @@ interface FirmwareInfo {
   size: number;
   timestamp: number;
   type?: string;
-  /** Release tag a default firmware was downloaded from ("bundled" if offline fallback) */
+  /** Release tag a default firmware was downloaded from */
   version?: string;
   isDefault?: boolean;
 }
@@ -254,12 +276,44 @@ interface GithubFirmware {
 
 interface GithubAsset {
   name: string;
-  browser_download_url: string;
 }
 
 interface GithubRelease {
+  tag_name: string;
   assets: GithubAsset[];
 }
+
+// Converts a raw GitHub API release into the Worker's format, with downloads
+// still going through the Worker (GitHub downloads have no CORS headers).
+const fromGithubRelease = (source: FirmwareSource, release: GithubRelease): LatestRelease => ({
+  tag: release.tag_name,
+  assets: (release.assets || []).map(a => ({ name: a.name, url: workerFirmwareUrl(source, release.tag_name, a.name) })),
+});
+
+// Latest release of a repo, via the Worker (token-authenticated and cached,
+// so visitors don't hit GitHub's 60 req/hour unauthenticated limit). Falls
+// back to calling the GitHub API directly. null if both fail.
+const fetchLatestRelease = async (source: FirmwareSource): Promise<LatestRelease | null> => {
+  try {
+    const response = await fetch(`${source.worker}/latest`, {
+      signal: AbortSignal.timeout(10000),
+      mode: 'cors'
+    });
+    if (response.ok) return await response.json() as LatestRelease;
+  } catch (error) {
+    console.log('Worker release lookup failed:', error);
+  }
+  try {
+    const response = await fetch(`https://api.github.com/repos/${source.repo}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json' },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (response.ok) return fromGithubRelease(source, await response.json() as GithubRelease);
+  } catch (error) {
+    console.log('GitHub API release lookup failed:', error);
+  }
+  return null;
+};
 
 // Fixed offsets used when flashing the complete firmware set
 const BOOTLOADER_ADDRESS = 0x0;
@@ -359,7 +413,7 @@ export default function ESP32Flasher() {
   const espLoaderRef = useRef<ExtendedESPLoader | null>(null);
   const serialPortRef = useRef<SerialPort | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const githubRepo = 'upsidedownlabs/npg-lite-firmware';
+  const githubRepo = NPG_LITE_SOURCE.repo;
   const lastLogRef = useRef<HTMLDivElement>(null);
   const advancedButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -445,36 +499,23 @@ export default function ESP32Flasher() {
   const getLatestPrebuiltTag = (): Promise<string | null> => {
     if (!latestPrebuiltTagRef.current) {
       latestPrebuiltTagRef.current = (async () => {
-        try {
-          const response = await fetch(`https://api.github.com/repos/${PREBUILT_FIRMWARE_REPO}/releases/latest`, {
-            headers: { 'Accept': 'application/vnd.github.v3+json' },
-            signal: AbortSignal.timeout(10000)
-          });
-          if (!response.ok) return null;
-          const release = await response.json() as { tag_name?: string };
-          if (release.tag_name) setPrebuiltVersion(release.tag_name);
-          return release.tag_name ?? null;
-        } catch (error) {
-          console.log('Could not fetch latest pre-built release:', error);
-          return null;
-        }
+        const release = await fetchLatestRelease(PREBUILT_SOURCE);
+        if (release?.tag) setPrebuiltVersion(release.tag);
+        return release?.tag ?? null;
       })();
     }
     return latestPrebuiltTagRef.current;
   };
 
   // Downloads a pre-built firmware from the GitHub release (through the
-  // Cloudflare Worker, since release downloads aren't CORS-enabled), falling
-  // back to the copy bundled with the app if that fails.
+  // Cloudflare Worker, since release downloads aren't CORS-enabled).
   const fetchDefaultFirmwareData = async (
     firmware: DefaultFirmware,
     tag: string | null
   ): Promise<{ data: ArrayBuffer; version: string } | null> => {
-    const releasePath = tag ? `download/${tag}` : 'latest/download';
-    const assetUrl = `https://github.com/${PREBUILT_FIRMWARE_REPO}/releases/${releasePath}/${firmware.name}`;
     try {
       addLog(`Downloading ${firmware.name} from ${PREBUILT_FIRMWARE_REPO} ${tag ?? '(latest)'}...`);
-      const response = await fetch(`${CLOUDFLARE_WORKER_URL}?url=${encodeURIComponent(assetUrl)}`, {
+      const response = await fetch(workerFirmwareUrl(PREBUILT_SOURCE, tag ?? 'latest', firmware.name), {
         signal: AbortSignal.timeout(60000),
         mode: 'cors'
       });
@@ -482,23 +523,13 @@ export default function ESP32Flasher() {
       if (response.ok && !contentType.includes('text/html')) {
         const data = await response.arrayBuffer();
         if (data.byteLength > 1000) {
-          return { data, version: tag ?? 'latest' };
+          return { data, version: tag ?? response.headers.get('X-Firmware-Version') ?? 'latest' };
         }
       }
       addLog(`⚠ GitHub download of ${firmware.name} failed (status ${response.status})`);
     } catch (error) {
       console.error(`Error downloading ${firmware.name} from GitHub:`, error);
       addLog(`⚠ GitHub download of ${firmware.name} failed`);
-    }
-
-    try {
-      const response = await fetch(firmware.fallbackUrl);
-      if (response.ok) {
-        addLog(`Using bundled ${firmware.type.toUpperCase()} firmware instead`);
-        return { data: await response.arrayBuffer(), version: 'bundled' };
-      }
-    } catch (error) {
-      console.error(`Error loading bundled ${firmware.name}:`, error);
     }
     return null;
   };
@@ -545,8 +576,6 @@ export default function ESP32Flasher() {
           addLog(`⚠ Could not load default ${firmware.type.toUpperCase()} firmware`);
           continue;
         }
-        // Don't replace a stored copy with the older bundled one
-        if (existing && result.version === 'bundled') continue;
         await saveFirmwareToDB(firmware.name, result.data, firmware.type, result.version);
         addLog(`✓ Saved ${firmware.name} (${result.version}, ${(result.data.byteLength / 1024).toFixed(2)} KB)`);
         loadedCount++;
@@ -1035,24 +1064,11 @@ export default function ESP32Flasher() {
       addLog(`Fetching firmwares from GitHub: ${githubRepo}...`);
       const apiUrl = `https://api.github.com/repos/${githubRepo}/releases/latest`;
 
-      let releasesData: GithubRelease | null = null;
-
-      try {
-        addLog('Trying GitHub API...');
-        const response = await fetch(apiUrl, {
-          headers: { 'Accept': 'application/vnd.github.v3+json' },
-          signal: AbortSignal.timeout(10000)
-        });
-
-        if (response.ok) {
-          releasesData = await response.json() as GithubRelease;
-          addLog('✓ Successfully fetched from GitHub API');
-        }
-      } catch (error: unknown) {
-        console.log('GitHub API fetch failed:', error);
-      }
-
-      if (!releasesData) {
+      let releasesData: LatestRelease | null = await fetchLatestRelease(NPG_LITE_SOURCE);
+      if (releasesData?.assets) {
+        addLog(`✓ Found release ${releasesData.tag}`);
+      } else {
+        releasesData = null;
         const corsProxies = [
           { name: 'allOrigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}` },
           { name: 'corsProxy', url: `https://corsproxy.io/?${encodeURIComponent(apiUrl)}` }
@@ -1067,7 +1083,7 @@ export default function ESP32Flasher() {
             });
 
             if (response.ok) {
-              releasesData = await response.json() as GithubRelease;
+              releasesData = fromGithubRelease(NPG_LITE_SOURCE, await response.json() as GithubRelease);
               addLog(`✓ Successfully fetched via ${proxy.name}`);
               break;
             }
@@ -1083,10 +1099,10 @@ export default function ESP32Flasher() {
 
       const assets = releasesData.assets || [];
       const firmwares = assets
-        .filter((asset: GithubAsset) => /\.ino\.merged\.bin$/i.test(asset.name))
-        .map((asset: GithubAsset) => ({
+        .filter(asset => /\.ino\.merged\.bin$/i.test(asset.name))
+        .map(asset => ({
           name: asset.name.replace(/\.ino\.merged\.bin$/i, ''),
-          url: asset.browser_download_url,
+          url: asset.url,
         }));
 
       if (firmwares.length === 0) {
@@ -1153,7 +1169,7 @@ export default function ESP32Flasher() {
         setDownloadProgress('Downloading via Cloudflare Worker...');
         addLog(`Downloading via Cloudflare Worker...`);
 
-        const response = await fetch(`${CLOUDFLARE_WORKER_URL}?url=${encodeURIComponent(url)}`, {
+        const response = await fetch(url, {
           method: 'GET',
           headers: commonHeaders,
           signal: AbortSignal.timeout(30000),
