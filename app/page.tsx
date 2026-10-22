@@ -27,7 +27,7 @@ const PREBUILT_SOURCE: FirmwareSource = {
 // NPG Lite project firmwares
 const NPG_LITE_SOURCE: FirmwareSource = {
   repo: 'upsidedownlabs/NPG-Lite-Arduino-Firmware',
-  worker: 'https://npg-flasher-web.amanmaheshwari715.workers.dev',
+  worker: 'https://npg-flasher-web.myupsidedownlab.workers.dev',
 };
 
 // Worker URL that serves one release asset (tag may be "latest")
