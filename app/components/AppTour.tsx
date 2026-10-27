@@ -2,6 +2,7 @@
 'use client';
 import { driver, type DriveStep, type Driver } from 'driver.js';
 import { useEffect, useRef } from 'react';
+import { Compass } from 'lucide-react';
 
 interface AppTourProps {
   autoStart?: boolean;
@@ -15,71 +16,89 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.connection-section',
         popover: {
-          title: '🔌 Device Connection',
-          description: 'Start by connecting your NPG Lite device or ESP32 device. Click "Connect Device" and select the correct COM port when prompted.',
+          title: 'Device connection',
+          description: 'Start by connecting your NPG Lite device. Click "Connect Device" and select the correct COM port when prompted.',
           side: 'bottom' as const,
+          align: 'end' as const,
+        },
+      },
+      {
+        element: '.firmware-selection',
+        popover: {
+          title: 'Firmware sources',
+          description: 'Every firmware you can flash is listed here: the default builds, NPG Lite projects from GitHub, and files you add yourself. Click one to select it.',
+          side: 'right' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.default-firmwares-section',
         popover: {
-          title: '📱 Built-in Firmwares',
-          description: 'Quickly select from three pre-built firmware versions: BLE (Bluetooth), WiFi, or Serial (direct USB). These are included with the app and will be stored locally.',
-          side: 'bottom' as const,
-          align: 'start' as const,
-        },
-      },
-      {
-        element: '.firmware-selection',
-        popover: {
-          title: '📦 Firmware Selection',
-          description: 'Choose your firmware here. You can select built-in versions, add local .bin files, or download from GitHub releases.',
-          side: 'bottom' as const,
-          align: 'start' as const,
-        },
-      },
-      {
-        element: '.add-firmware-btn',
-        popover: {
-          title: '➕ Add Custom Firmware',
-          description: 'Upload your own firmware .bin files from your computer. They will be saved in browser storage for future use and appear in the Local Firmwares list.',
-          side: 'left' as const,
+          title: 'Default firmwares',
+          description: 'The standard BLE, WiFi and Serial builds, downloaded from the latest Chords-Arduino-Firmware release and kept up to date automatically.',
+          side: 'right' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.github-firmware-btn',
         popover: {
-          title: '🐙 Get from GitHub',
-          description: 'Download the latest firmware releases directly from the official GitHub repository.',
-          side: 'left' as const,
+          title: 'NPG Lite projects',
+          description: 'Every project from the latest NPG-Lite-Arduino-Firmware release on GitHub. Click one to download and select it, or use the download-all icon to save every project at once. Saved projects stay in this browser for next time.',
+          side: 'right' as const,
+          align: 'start' as const,
+        },
+      },
+      {
+        element: '.local-firmwares-section',
+        popover: {
+          title: 'Your firmwares',
+          description: 'Firmwares you added from your computer. Click one to select it, or delete the ones you no longer need.',
+          side: 'right' as const,
+          align: 'start' as const,
+        },
+      },
+      {
+        element: '.add-firmware-btn',
+        popover: {
+          title: 'Add Firmware',
+          description: 'Upload your own .bin file. It is saved in this browser and listed under Your firmwares.',
+          side: 'right' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.selected-firmware-display',
         popover: {
-          title: '✅ Selected Firmware',
-          description: 'Currently selected firmware appears here. You can see the file name, size, and type. Click the X to clear selection.',
-          side: 'bottom' as const,
+          title: 'Selected firmware',
+          description: 'The firmware that will be flashed: its file name, size and type. Click the X to clear the selection.',
+          side: 'left' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.flash-address-section',
         popover: {
-          title: '⚙️ Advanced Options',
-          description: 'Set custom flash memory address (default is 0x10000 for application partition). Only change if you know what you\'re doing!',
-          side: 'top' as const,
+          title: 'Advanced Options',
+          description: 'The flash address is set automatically from the file name (0x0 for merged images, 0x10000 for app-only files). Only change it if you know what you\'re doing.',
+          side: 'left' as const,
           align: 'start' as const,
         },
       },
       {
         element: '.flash-button',
         popover: {
-          title: '🚀 Flash Firmware',
-          description: 'Once device is connected and firmware is selected, click here to start the flashing process. Do not disconnect during flashing!',
+          title: 'Flash Firmware',
+          description: 'Once a device is connected and a firmware is selected, click here to start flashing. Do not disconnect during flashing!',
+          side: 'top' as const,
+          align: 'center' as const,
+        },
+      },
+      {
+        element: '.progress-section',
+        popover: {
+          title: 'Progress tracking',
+          description: 'While flashing, the button fills up and shows the percentage. Wait for 100% before disconnecting.',
           side: 'top' as const,
           align: 'center' as const,
         },
@@ -87,37 +106,10 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.console-section',
         popover: {
-          title: '📟 Console Output',
-          description: 'Watch real-time logs here during connection and flashing process. Clear logs with the Clear button if needed.',
-          side: 'left' as const,
-          align: 'start' as const,
-        },
-      },
-      {
-        element: '.local-firmwares-section',
-        popover: {
-          title: '💾 Local Firmware Storage',
-          description: 'Manage all your firmwares here. Built-in firmwares (with colored badges) cannot be deleted. Custom firmwares can be loaded or deleted.',
-          side: 'left' as const,
-          align: 'start' as const,
-        },
-      },
-      {
-        element: '.firmware-list-item:first-child',
-        popover: {
-          title: '📂 Firmware Management',
-          description: 'Each firmware shows its name, size, and date. Click "Load" to select it, or "Delete" to remove custom firmwares (built-in ones are protected).',
-          side: 'left' as const,
-          align: 'start' as const,
-        },
-      },
-      {
-        element: '.progress-section',
-        popover: {
-          title: '📊 Progress Tracking',
-          description: 'Monitor flashing progress here. The green bar shows completion percentage. Wait for 100% before disconnecting!',
+          title: 'Console output',
+          description: 'Live logs from connecting and flashing. Errors are shown in red and warnings in amber. Use Clear to empty it.',
           side: 'top' as const,
-          align: 'center' as const,
+          align: 'start' as const,
         },
       },
     ];
@@ -167,11 +159,11 @@ export function AppTour({ autoStart = false }: AppTourProps) {
     <div className="fixed bottom-2 right-6 z-40 flex flex-col gap-2">
       <button
         onClick={startTour}
-        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-full shadow-lg font-medium transition-colors flex items-center gap-2"
+        className="flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-900/40 backdrop-blur transition-colors hover:bg-blue-500"
         title="Start Guided Tour"
       >
-        <span className="text-md">🎯</span>
-        <span className="hidden sm:inline">Guide</span>
+        <Compass className="h-4 w-4" />
+        <span>Guide</span>
       </button>
       
  
