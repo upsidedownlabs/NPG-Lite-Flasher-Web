@@ -2,8 +2,9 @@
 @import 'driver.js/dist/driver.css';
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -13,241 +14,164 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/*
+ * Large windows: the flasher is one screen that never scrolls. Every size is
+ * in rem, and the root font size follows the window so a 100rem x 50rem
+ * layout always fits: whichever of width and height is tighter decides, and
+ * text and panels grow or shrink together.
+ *
+ * Smaller windows (where that would make text too small to read): normal 16px
+ * text, panels stacked in one column, and the page scrolls. The `desk:`
+ * variant below marks the classes that apply only to the large layout.
+ */
+@custom-variant desk (@media (min-width: 1200px) and (min-height: 600px));
+
+@media (min-width: 1200px) and (min-height: 600px) {
+  html {
+    font-size: min(1vw, 100dvh / 50);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.95em;
+  color: var(--color-neutral-300);
 }
 
 /* ──────────────────────────────────────────────────────────
-   Custom thin scrollbar (used via .custom-scrollbar class)
+   Thin dark scrollbar for the page and every scrolling panel
    ────────────────────────────────────────────────────────── */
-.custom-scrollbar {
+* {
   scrollbar-width: thin;                 /* Firefox */
-  scrollbar-color: #4b5563 transparent;  /* thumb track - Firefox */
+  scrollbar-color: #404040 transparent;  /* thumb track - Firefox */
 }
 
-.custom-scrollbar::-webkit-scrollbar {
+*::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
+*::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #4b5563; /* gray-600 */
+*::-webkit-scrollbar-thumb {
+  background-color: #404040; /* neutral-700 */
   border-radius: 9999px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: #6b7280; /* gray-500 */
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #525252; /* neutral-600 */
 }
 
-.custom-scrollbar::-webkit-scrollbar-corner {
+*::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* Add to your globals.css */
-
-.driver-popover-custom {
-  background: #1f2937 !important;
-  border: 1px solid #374151 !important;
-  color: white !important;
-  border-radius: 12px !important;
-  padding: 20px !important;
-  min-width: 400px !important;
-  max-width: 500px !important;
+/* ──────────────────────────────────────────────────────────
+   Guided tour (driver.js) - matches the app's neutral panels
+   ────────────────────────────────────────────────────────── */
+.driver-popover.driver-popover-custom {
+  background: #171717;
+  border: 1px solid #262626;
+  color: #ededed;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  min-width: 22rem;
+  max-width: 28rem;
+  box-shadow: 0 1.5rem 3rem -1rem rgba(0, 0, 0, 0.6);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
 .driver-popover-custom .driver-popover-title {
-  color: white !important;
-  font-size: 1.3em !important;
-  font-weight: 700 !important;
-  margin-bottom: 12px !important;
-  line-height: 1.4 !important;
-}
-
-.driver-popover-custom .driver-popover-description {
-  color: #d1d5db !important;
-  font-size: 1.1em !important;
-  line-height: 1.5 !important;
-  margin-bottom: 20px !important;
-}
-
-.driver-popover-custom .driver-popover-footer {
-  border-top: 1px solid #374151 !important;
-  padding-top: 20px !important;
-  gap: 12px !important;
-}
-
-.driver-popover-custom .driver-popover-progress-text {
-  color: #9ca3af !important;
-  font-size: 1em !important;
-  font-weight: 600 !important;
-}
-
-.driver-popover-custom .driver-popover-next-btn {
-  background: #2563eb !important;
-  color: white !important;
-  border: none !important;
-  padding: 12px 24px !important;
-  font-size: 1em !important;
-  font-weight: 600 !important;
-  border-radius: 8px !important;
-  min-width: 80px !important;
-}
-
-.driver-popover-custom .driver-popover-prev-btn {
-  color: #9ca3af !important;
-  border: 1px solid #374151 !important;
-  padding: 12px 24px !important;
-  font-size: 1em !important;
-  font-weight: 600 !important;
-  border-radius: 8px !important;
-  min-width: 80px !important;
-}
-
-.driver-popover-custom .driver-popover-close-btn {
-  color: #9ca3af !important;
-  font-size: 1.5em !important;
-  width: 32px !important;
-  height: 32px !important;
-}
-
-/* Make the arrow larger */
-.driver-popover-custom .driver-popover-arrow {
-  width: 24px !important;
-  height: 24px !important;
-}
-
-.driver-popover-custom .driver-popover-arrow-side-left {
-  border-right-color: #1f2937 !important;
-  border-width: 12px !important;
-}
-
-.driver-popover-custom .driver-popover-arrow-side-right {
-  border-left-color: #1f2937 !important;
-  border-width: 12px !important;
-}
-
-.driver-popover-custom .driver-popover-arrow-side-top {
-  border-bottom-color: #1f2937 !important;
-  border-width: 12px !important;
-}
-
-.driver-popover-custom .driver-popover-arrow-side-bottom {
-  border-top-color: #1f2937 !important;
-  border-width: 12px !important;
-}
-
-/* ULTRA VISIBLE HIGHLIGHT */
-.driver-highlighted-element {
-  border: 6px solid #f59e0b !important; /* Bright amber color */
-  border-radius: 12px !important;
-  box-shadow: 
-    0 0 0 8px rgba(245, 158, 11, 0.4),
-    0 0 0 16px rgba(245, 158, 11, 0.2),
-    0 0 40px 20px rgba(245, 158, 11, 0.3) !important;
-  z-index: 10001 !important;
-  position: relative !important;
-  animation: pulse-highlight 2s infinite !important;
-}
-
-@keyframes pulse-highlight {
-  0%, 100% {
-    border-color: #f59e0b;
-    box-shadow: 
-      0 0 0 8px rgba(245, 158, 11, 0.4),
-      0 0 0 16px rgba(245, 158, 11, 0.2),
-      0 0 40px 20px rgba(245, 158, 11, 0.3);
-  }
-  50% {
-    border-color: #fbbf24;
-    box-shadow: 
-      0 0 0 10px rgba(251, 191, 36, 0.5),
-      0 0 0 20px rgba(251, 191, 36, 0.3),
-      0 0 50px 25px rgba(251, 191, 36, 0.4);
-  }
-}
-
-.driver-overlay {
-  background: rgba(0, 0, 0, 0.5) !important; /* Even more transparent */
-  z-index: 9999 !important;
-}
-
-/* Add to your global.css or component styles */
-.driver-popover-custom {
-  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-  border: 1px solid #374151;
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-}
-
-.driver-popover-custom .driver-popover-title {
-  color: #60a5fa;
-  font-size: 1.2rem;
+  color: #fafafa;
+  font-size: 1rem;
   font-weight: 600;
-  margin-bottom: 8px;
+  line-height: 1.4;
+  margin-bottom: 0.5rem;
 }
 
 .driver-popover-custom .driver-popover-description {
-  color: #d1d5db;
-  font-size: 0.95rem;
-  line-height: 1.5;
+  color: #a3a3a3;
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
 .driver-popover-custom .driver-popover-footer {
-  margin-top: 16px;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid #262626;
 }
 
 .driver-popover-custom .driver-popover-progress-text {
-  color: #9ca3af;
-  font-size: 0.9rem;
+  color: #737373;
+  font-size: 0.75rem;
 }
 
 .driver-popover-custom .driver-popover-navigation-btns {
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
 }
 
-.driver-popover-custom .driver-popover-btn {
-  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 16px;
+.driver-popover-custom .driver-popover-footer button {
+  background: #262626;
+  color: #e5e5e5;
+  border: 1px solid #404040;
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
   font-weight: 500;
-  transition: all 0.2s;
+  text-shadow: none;
+  transition: background-color 0.15s;
 }
 
-.driver-popover-custom .driver-popover-btn:hover {
-  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
-  transform: translateY(-1px);
+.driver-popover-custom .driver-popover-footer button:hover {
+  background: #404040;
 }
 
-.driver-popover-custom .driver-popover-btn.driver-popover-prev-btn {
-  background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
+.driver-popover-custom .driver-popover-footer .driver-popover-next-btn {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
 }
 
-.driver-popover-custom .driver-popover-btn.driver-popover-prev-btn:hover {
-  background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+.driver-popover-custom .driver-popover-footer .driver-popover-next-btn:hover {
+  background: #3b82f6;
 }
 
 .driver-popover-custom .driver-popover-close-btn {
-  color: #9ca3af;
-  opacity: 0.8;
+  color: #737373;
 }
 
 .driver-popover-custom .driver-popover-close-btn:hover {
-  color: #d1d5db;
-  opacity: 1;
+  color: #e5e5e5;
+}
+
+.driver-popover-custom .driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: #171717;
+}
+
+.driver-popover-custom .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: #171717;
+}
+
+.driver-popover-custom .driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: #171717;
+}
+
+.driver-popover-custom .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: #171717;
+}
+
+/* Highlighted element: a quiet accent ring instead of a pulsing glow */
+.driver-active-element {
+  outline: 2px solid #3b82f6;
+  outline-offset: 4px;
+  border-radius: 0.5rem;
 }
