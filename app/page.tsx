@@ -1796,9 +1796,9 @@ export default function ESP32Flasher() {
         {/* Firmware sources: defaults + yours, and NPG Lite projects */}
         <div className="firmware-selection contents desk:flex desk:flex-row desk:gap-4 desk:flex-shrink-0 desk:min-h-0">
           {/* Column 1: Chords firmwares on top, your firmwares below */}
-          <aside className="contents desk:flex desk:w-[22rem] desk:min-h-0 desk:flex-col desk:bg-neutral-900/60 desk:rounded-xl desk:border desk:border-neutral-800">
+          <aside className="contents desk:flex desk:w-[22rem] desk:min-h-0 desk:flex-col desk:bg-neutral-900/60 desk:rounded-xl desk:border desk:border-blue-400/50">
             <div className="contents desk:flex desk:flex-1 desk:min-h-0 desk:flex-col desk:gap-6 desk:p-5">
-            <section className="default-firmwares-section order-2 desk:order-none flex-shrink-0 rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 desk:rounded-none desk:border-0 desk:bg-transparent desk:p-0">
+            <section className="default-firmwares-section order-2 desk:order-none flex-shrink-0 rounded-xl border border-blue-400/50 bg-neutral-900/60 p-5 desk:rounded-none desk:border-0 desk:bg-transparent desk:p-0">
               <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-1.5">
               <label className="block text-sm font-medium text-neutral-300">
@@ -1865,7 +1865,7 @@ export default function ESP32Flasher() {
             {/* Firmwares the user added */}
             <section
               {...dropZone('list')}
-              className="local-firmwares-section order-4 desk:order-none relative flex-none desk:flex-1 desk:basis-0 min-h-0 flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 desk:rounded-none desk:border-x-0 desk:border-b-0 desk:bg-transparent desk:p-0 desk:pt-5"
+              className="local-firmwares-section order-4 desk:order-none relative flex-none desk:flex-1 desk:basis-0 min-h-0 flex flex-col rounded-xl border border-blue-400/50 bg-neutral-900/60 p-5 desk:rounded-none desk:border-x-0 desk:border-b-0 desk:border-neutral-800 desk:bg-transparent desk:p-0 desk:pt-5"
             >
               {dropTarget === 'list' && (
                 <div className="pointer-events-none absolute inset-0 top-2 z-10 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-emerald-500/60 bg-neutral-950">
@@ -1980,7 +1980,7 @@ export default function ESP32Flasher() {
           </aside>
 
           {/* Column 2: NPG Lite projects, full height */}
-          <aside className="order-3 desk:order-none flex-none w-full desk:w-[20rem] min-h-0 flex flex-col bg-neutral-900/60 rounded-xl border border-neutral-800 p-5">
+          <aside className="order-3 desk:order-none flex-none w-full desk:w-[20rem] min-h-0 flex flex-col bg-neutral-900/60 rounded-xl border border-violet-400/50 p-5">
             {/* NPG Lite projects from the GitHub release */}
             <section className="github-firmware-btn desk:flex-1 min-h-0 flex flex-col">
               <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-3">
@@ -2320,7 +2320,7 @@ export default function ESP32Flasher() {
               Clear
             </button>
             </div>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 pr-24 flex-1 overflow-y-auto font-mono text-xs leading-relaxed break-words min-h-0 custom-scrollbar">
+            <div className="bg-neutral-950 border border-white/50 rounded-lg px-4 py-3 pr-24 flex-1 overflow-y-auto font-mono text-xs leading-relaxed break-words min-h-0 custom-scrollbar">
               {logs.map((log, index) => (
                 <div
                   key={index}
