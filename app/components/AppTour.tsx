@@ -14,7 +14,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   useEffect(() => {
     const tourSteps: DriveStep[] = [
       {
-        element: '.connection-section',
+        element: '.connect-button',
         popover: {
           title: 'Device connection',
           description: 'Start by connecting your NPG Lite device. Click "Connect Device" and select the correct COM port when prompted.',

@@ -1724,7 +1724,7 @@ export default function ESP32Flasher() {
     <button
       onClick={flashFirmware}
       disabled={flashDisabled}
-      className={`relative min-w-0 overflow-hidden rounded-lg border border-emerald-400/60 bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-sm font-semibold shadow-lg shadow-emerald-900/40 transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:border-emerald-500/30 disabled:from-emerald-500/15 disabled:to-teal-500/15 disabled:text-emerald-200/70 disabled:shadow-none ${className}`}
+      className={`relative min-w-0 overflow-hidden rounded-lg border border-emerald-500 bg-emerald-600 text-white text-sm font-semibold shadow-sm transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-emerald-500/30 disabled:bg-emerald-500/15 disabled:text-emerald-200/70 disabled:shadow-none ${className}`}
     >
       {/* Progress fills the button while flashing */}
       {(isFlashing || flashResult) && (
@@ -1741,24 +1741,24 @@ export default function ESP32Flasher() {
   );
 
   return (
-    <div className="min-h-dvh desk:h-dvh desk:overflow-hidden flex flex-col gap-4 bg-neutral-950 bg-[radial-gradient(ellipse_at_top_left,rgba(37,99,235,0.18),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(124,58,237,0.14),transparent_55%)] text-neutral-100 p-4 pb-[calc(4.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] desk:pb-4">
+    <div className="min-h-dvh desk:h-dvh desk:overflow-hidden flex flex-col gap-4 bg-[#0A1426] text-neutral-100 p-4 pb-[calc(4.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] desk:pb-4">
       {/* Navbar: app name + device connection. Small screens get one compact
           line: title, GitHub, Connect, and a dot for the connection status. */}
-      <header className="-mx-4 -mt-4 flex items-center justify-between gap-2 desk:gap-4 border-b border-neutral-800 bg-neutral-950/70 px-4 py-2.5 desk:px-6 desk:py-3 backdrop-blur">
+      <header className="-mx-4 -mt-4 flex items-center justify-between gap-2 desk:gap-4 bg-[#09111D] px-4 py-2.5 desk:px-6 desk:py-3 shadow-md shadow-black/40">
         <div className="min-w-0">
-          <h1 className="truncate text-base desk:text-lg font-semibold tracking-tight text-neutral-50">
+          <h1 className="truncate text-[0.9375rem] desk:text-lg font-semibold tracking-tight text-white">
             <span className="desk:hidden">NPG Lite Firmware Flasher</span>
             <span className="hidden desk:inline">Neuro PlayGround (NPG) Lite Firmware Flasher</span>
           </h1>
-          <p className="hidden desk:block truncate text-xs text-neutral-500">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
+          <p className="hidden desk:block truncate text-xs text-neutral-400">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
         </div>
-        <div className="connection-section flex flex-shrink-0 items-center gap-2 desk:gap-3">
+        <div className="connection-section flex flex-shrink-0 items-center gap-1.5 desk:gap-3">
           <a
             href={FLASHER_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
             title="NPG Lite Flasher on GitHub"
-            className="rounded-lg p-1.5 desk:p-2 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 transition-colors"
+            className="rounded-lg p-1 desk:p-2 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 transition-colors"
           >
             <GithubMark className="h-5 w-5" />
           </a>
@@ -1776,7 +1776,7 @@ export default function ESP32Flasher() {
             <button
               onClick={connectToDevice}
               disabled={isFlashing}
-              className="whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-xs desk:text-sm font-semibold shadow-sm transition-colors"
+              className="connect-button whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-xs desk:text-sm font-semibold shadow-sm transition-colors"
             >
               Connect<span className="hidden desk:inline"> Device</span>
             </button>
@@ -1784,7 +1784,7 @@ export default function ESP32Flasher() {
             <button
               onClick={disconnectDevice}
               disabled={isFlashing}
-              className="whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 disabled:cursor-not-allowed disabled:opacity-50 rounded-lg text-xs desk:text-sm font-medium transition-colors"
+              className="connect-button whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 disabled:cursor-not-allowed disabled:opacity-50 rounded-lg text-xs desk:text-sm font-medium transition-colors"
             >
               Disconnect
             </button>
@@ -2172,7 +2172,7 @@ export default function ESP32Flasher() {
         {/* Right: flashing on top, console below */}
         <main className="contents desk:flex desk:flex-1 desk:min-w-0 desk:min-h-0 desk:flex-col desk:gap-4">
           {/* On small screens this panel is replaced by the footer below */}
-          <section className="flash-panel hidden desk:block flex-none desk:overflow-y-auto custom-scrollbar bg-gradient-to-br from-emerald-500/10 via-neutral-900/70 to-blue-500/10 rounded-xl border border-emerald-500/25 p-5 space-y-3">
+          <section className="flash-panel hidden desk:block flex-none desk:overflow-y-auto custom-scrollbar bg-neutral-900/70 rounded-xl border border-emerald-500/25 p-5 space-y-3">
             <div className="flex items-center gap-1.5">
               <h2 className="text-base font-semibold text-neutral-100">Flash Firmware</h2>
               <InfoButton label="flashing firmware">
@@ -2442,7 +2442,7 @@ export default function ESP32Flasher() {
       })()}
 
       {/* Small screens: flashing lives in a footer that stays at the bottom */}
-      <footer className="mobile-flash-bar desk:hidden fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-emerald-500/25 bg-neutral-950/95 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <footer className="mobile-flash-bar desk:hidden fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-emerald-500/25 bg-neutral-900 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur">
         {/* Selected firmware takes the free space */}
         {firmwareFile ? (
           <div className="flex h-10 min-w-0 flex-1 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/5 pl-2.5 pr-1">
