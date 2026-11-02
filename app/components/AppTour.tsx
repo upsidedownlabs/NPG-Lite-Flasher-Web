@@ -156,18 +156,14 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   };
 
   return (
-    // On small screens it sits above the flash footer instead of covering it
-    <div className="fixed bottom-[calc(3.875rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] right-4 desk:bottom-2 desk:right-6 z-40 flex flex-col gap-2">
-      <button
-        onClick={startTour}
-        className="flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-900/40 backdrop-blur transition-colors hover:bg-blue-500"
-        title="Start Guided Tour"
-      >
-        <Compass className="h-4 w-4" />
-        <span>Guide</span>
-      </button>
-      
- 
-    </div>
+    <button
+      onClick={startTour}
+      title="Start Guided Tour"
+      aria-label="Start Guided Tour"
+      className="flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 p-1.5 desk:px-3 desk:py-1.5 text-sm font-medium text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-blue-200"
+    >
+      <Compass className="h-4 w-4" />
+      <span className="hidden desk:inline">Guide</span>
+    </button>
   );
 }

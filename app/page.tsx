@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ESPLoader, Transport } from 'esptool-js';
 import { AppTour } from './components/AppTour';
-import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, ChevronRight, FileText, CloudDownload, Trash2, ChevronDown, Info, Lock, Layers, SlidersHorizontal } from 'lucide-react';
+import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, FileText, CloudDownload, Trash2, ChevronDown, Info, Lock, Layers, SlidersHorizontal, Zap } from 'lucide-react';
 
 // IndexedDB utility functions
 const DB_NAME = 'ESP32FlasherDB';
@@ -530,10 +530,10 @@ const InfoButton = ({ label, children }: { label: string; children: React.ReactN
         onPointerEnter={(e) => e.pointerType === 'mouse' && show()}
         onPointerLeave={hideSoon}
         onFocus={show}
-        onBlur={() => !pinned && setPos(null)}
+        onBlur={(e) => !pinned && !popoverRef.current?.contains(e.relatedTarget as Node) && setPos(null)}
         aria-label={`About ${label}`}
         aria-expanded={!!pos}
-        className={`flex-shrink-0 rounded-full transition-colors hover:text-neutral-100 ${pos ? 'text-neutral-100' : 'text-neutral-400'}`}
+        className={`flex-shrink-0 rounded-full transition-colors hover:text-blue-300 ${pos ? 'text-blue-300' : 'text-blue-400'}`}
       >
         {/* A slightly larger, bolder icon than the text around it stays sharp
             when the page scales to small sizes */}
@@ -588,7 +588,6 @@ export default function ESP32Flasher() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Popup is fixed to the window (so the scrolling Flash panel can't clip it),
   // placed just above the "Advanced Option" button
-  const [advancedPopupPos, setAdvancedPopupPos] = useState<{ left: number; bottom: number } | null>(null);
   const [githubFirmwares, setGithubFirmwares] = useState<GithubFirmware[]>([]);
   const [isFetchingGithub, setIsFetchingGithub] = useState(false);
   const [downloadingFirmware, setDownloadingFirmware] = useState<string | null>(null);
@@ -610,7 +609,6 @@ export default function ESP32Flasher() {
   const fullFlashFileInputRef = useRef<HTMLInputElement>(null);
   const githubRepo = NPG_LITE_SOURCE.repo;
   const lastLogRef = useRef<HTMLDivElement>(null);
-  const advancedButtonRef = useRef<HTMLButtonElement>(null);
   const githubListRequestedRef = useRef(false);
 
   const addLog = (message: string) => {
@@ -853,52 +851,32 @@ export default function ESP32Flasher() {
     };
   }, []);
 
+  // Closing the "Flash complete firmware" dialog without choosing a bootloader
+  // or partition table turns the option back off, so it doesn't stay on with
+  // nothing to flash (and keep Advanced Options disabled).
+  const closeFullFlashDialog = () => {
+    setShowFullFlashDialog(false);
+    if (!bootloaderFile && !partitionTableFile) setFlashFullFirmware(false);
+  };
+
   // Escape closes the "Flash complete firmware" dialog
   useEffect(() => {
     if (!showFullFlashDialog) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShowFullFlashDialog(false);
+      if (e.key === 'Escape') closeFullFlashDialog();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showFullFlashDialog]);
+  });
 
-  // Close advanced popup when clicking outside
+  // Escape closes the Advanced Options dialog
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const el = target instanceof Element ? target : (target as Node).parentElement;
-
-      if (
-        showAdvanced &&
-        !(el instanceof Element && el.closest('.advanced-popup, .advanced-toggle'))
-      ) {
-        setShowAdvanced(false);
-      }
+    if (!showAdvanced) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowAdvanced(false);
     };
-
-    // A fixed popup would drift from its button when the page or the panel
-    // holding it scrolls (or the window resizes) - close it instead. Other
-    // scrolling, like the console following new logs, is ignored.
-    const close = (event: Event) => {
-      const t = event.target;
-      const movesButton =
-        event.type === 'resize' ||
-        t === document ||
-        (t instanceof Node && !!advancedButtonRef.current && t.contains(advancedButtonRef.current));
-      if (movesButton) setShowAdvanced(false);
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    if (showAdvanced) {
-      window.addEventListener('resize', close);
-      window.addEventListener('scroll', close, true);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
-    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [showAdvanced]);
 
   // The NPG Lite project list is shown inline, so fetch it on load (once,
@@ -1734,15 +1712,7 @@ export default function ESP32Flasher() {
         : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware';
   const fullFlashReadyCount = [bootloaderFile, partitionTableFile, firmwareFile].filter(Boolean).length;
 
-  // Both the desktop panel and the mobile footer have an Advanced Options button
-  const toggleAdvanced = (button: HTMLElement) => {
-    const rect = button.getBoundingClientRect();
-    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
-    const width = Math.min(22 * rem, window.innerWidth - 16);
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    setAdvancedPopupPos({ left, bottom: window.innerHeight - rect.top + 8 });
-    setShowAdvanced(!showAdvanced);
-  };
+
 
   const toggleFullFlash = () => {
     const next = !flashFullFirmware;
@@ -1754,7 +1724,7 @@ export default function ESP32Flasher() {
     <button
       onClick={flashFirmware}
       disabled={flashDisabled}
-      className={`relative min-w-0 overflow-hidden bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors ${className}`}
+      className={`relative min-w-0 overflow-hidden rounded-lg border border-emerald-400/60 bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-sm font-semibold shadow-lg shadow-emerald-900/40 transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:border-emerald-500/30 disabled:from-emerald-500/15 disabled:to-teal-500/15 disabled:text-emerald-200/70 disabled:shadow-none ${className}`}
     >
       {/* Progress fills the button while flashing */}
       {(isFlashing || flashResult) && (
@@ -1763,8 +1733,9 @@ export default function ESP32Flasher() {
           style={{ width: `${progress}%` }}
         />
       )}
-      <span className={`relative block truncate whitespace-nowrap ${isFlashing || flashResult ? 'text-neutral-100 tabular-nums' : ''}`}>
-        {label}
+      <span className={`relative flex items-center justify-center gap-1.5 whitespace-nowrap ${isFlashing || flashResult ? 'text-neutral-100 tabular-nums' : ''}`}>
+        {!isFlashing && !flashResult && <Zap className="h-4 w-4 flex-shrink-0" />}
+        <span className="truncate">{label}</span>
       </span>
     </button>
   );
@@ -1791,6 +1762,7 @@ export default function ESP32Flasher() {
           >
             <GithubMark className="h-5 w-5" />
           </a>
+          <AppTour autoStart={false} />
           <div
             title={isConnected ? `${chipInfo || 'Device'} connected` : 'Not connected'}
             className="order-last desk:order-none flex items-center gap-2 desk:rounded-full desk:border desk:border-neutral-800 desk:bg-neutral-900 desk:px-3 desk:py-1.5 text-xs"
@@ -1901,8 +1873,8 @@ export default function ESP32Flasher() {
                   <p className="text-sm font-medium text-emerald-300">Drop .bin files to add them</p>
                 </div>
               )}
-              <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
+              <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <h2 className="whitespace-nowrap text-sm font-medium text-neutral-300">Your firmwares</h2>
                   <InfoButton label="your firmwares">
                     Your own .bin files. Add them with Add Firmware or by dragging them here, then click one to select
@@ -1931,7 +1903,8 @@ export default function ESP32Flasher() {
                     className="add-firmware-btn flex items-center gap-1.5 whitespace-nowrap px-2.5 py-1.5 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 disabled:cursor-not-allowed disabled:opacity-50 rounded-lg text-xs font-medium transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Add Firmware
+                    {/* Narrow phones: just "Add", so the header stays on one line */}
+                    <span>Add<span className="max-[380px]:hidden"> Firmware</span></span>
                   </button>
                 </div>
               </div>
@@ -2016,6 +1989,18 @@ export default function ESP32Flasher() {
                   <InfoButton label="NPG Lite projects">
                     Ready-made projects from the latest NPG-Lite-Arduino-Firmware release. Click one to download and
                     select it, or use the download icon to save them all. Downloaded projects stay in this browser.
+                    <span className="mt-2 block">
+                      Not sure what a firmware does? Check out the README of every firmware in the{' '}
+                      <a
+                        href={`https://github.com/${NPG_LITE_SOURCE.repo}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                      >
+                        NPG-Lite-Arduino-Firmware repository
+                      </a>
+                      {' '}on GitHub.
+                    </span>
                   </InfoButton>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-0.5">
@@ -2187,7 +2172,7 @@ export default function ESP32Flasher() {
         {/* Right: flashing on top, console below */}
         <main className="contents desk:flex desk:flex-1 desk:min-w-0 desk:min-h-0 desk:flex-col desk:gap-4">
           {/* On small screens this panel is replaced by the footer below */}
-          <section className="flash-panel hidden desk:block flex-none desk:overflow-y-auto custom-scrollbar bg-neutral-900/60 rounded-xl border border-neutral-800 p-5 space-y-3">
+          <section className="flash-panel hidden desk:block flex-none desk:overflow-y-auto custom-scrollbar bg-gradient-to-br from-emerald-500/10 via-neutral-900/70 to-blue-500/10 rounded-xl border border-emerald-500/25 p-5 space-y-3">
             <div className="flex items-center gap-1.5">
               <h2 className="text-base font-semibold text-neutral-100">Flash Firmware</h2>
               <InfoButton label="flashing firmware">
@@ -2223,14 +2208,14 @@ export default function ESP32Flasher() {
                   </button>
                 </div>
               ) : (
-                <div className="h-[5.25rem] flex flex-col items-center justify-center px-4 bg-neutral-950/50 rounded-lg border border-dashed border-neutral-700 text-center">
-                  <p className="text-sm text-neutral-400">No firmware selected</p>
-                  <p className="mt-1 text-xs text-neutral-500">Pick a Chords firmware, an NPG Lite project or one of your own.</p>
+                <div className="h-[5.25rem] flex flex-col items-center justify-center px-4 bg-emerald-500/[0.04] rounded-lg border border-dashed border-emerald-500/30 text-center">
+                  <p className="text-sm text-neutral-300">No firmware selected</p>
+                  <p className="mt-1 text-xs text-neutral-400">Pick a Chords firmware, an NPG Lite project or one of your own.</p>
                 </div>
               )}
             </div>
 
-            <div className="full-flash-option flex items-start gap-3 px-4 py-3 h-[6.25rem] overflow-hidden bg-neutral-950/50 rounded-lg border border-neutral-800">
+            <div className="full-flash-option flex items-start gap-3 px-4 py-3 h-[6.25rem] overflow-hidden bg-blue-500/[0.05] rounded-lg border border-blue-500/20">
               <div className="relative flex items-center mt-0.5">
                 <input
                   type="checkbox"
@@ -2304,12 +2289,11 @@ export default function ESP32Flasher() {
             <div className="flex items-center gap-4">
             <div className="flash-address-section relative flex-shrink-0">
               <button
-                ref={advancedButtonRef}
-                onClick={(e) => toggleAdvanced(e.currentTarget)}
+                onClick={() => setShowAdvanced(true)}
                 disabled={isFlashing || flashFullFirmware}
-                className="advanced-toggle flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="advanced-toggle flex items-center gap-2 text-sm font-medium text-blue-300 hover:text-blue-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                <ChevronRight className={`h-4 w-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
+                <SlidersHorizontal className="h-4 w-4" />
                 Advanced Options
               </button>
             </div>
@@ -2351,8 +2335,8 @@ export default function ESP32Flasher() {
         </main>
       </div>
 
-      {/* Advanced Options popup, opened from the desktop panel or the mobile footer */}
-      {showAdvanced && !isFlashing && !flashFullFirmware && advancedPopupPos && (() => {
+      {/* Advanced Options dialog, opened from the desktop panel or the mobile footer */}
+      {showAdvanced && !isFlashing && !flashFullFirmware && (() => {
         const detected = firmwareFile ? detectAddressForFilename(firmwareFile.name) : null;
         const recommended = detected?.address ?? '0x10000';
         // A merged image only works at 0x0, so its address can't be edited
@@ -2360,88 +2344,105 @@ export default function ESP32Flasher() {
         const isRecommended = isLocked || flashAddress.trim().toLowerCase() === recommended.toLowerCase();
         return (
           <div
-            className="advanced-popup fixed z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
-            style={{ left: advancedPopupPos.left, bottom: advancedPopupPos.bottom }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setShowAdvanced(false);
+            }}
           >
-            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-              <h3 className="text-sm font-semibold text-neutral-100">Advanced Options</h3>
-              <button
-                onClick={() => setShowAdvanced(false)}
-                title="Close"
-                className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 p-4">
-              <div>
-                <label htmlFor="flashAddressInput" className="mb-1.5 block text-xs font-medium text-neutral-400">
-                  Flash address (hex)
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="flashAddressInput"
-                    type="text"
-                    value={isLocked ? recommended : flashAddress}
-                    onChange={(e) => setFlashAddress(e.target.value)}
-                    onBlur={handleFlashAddressBlur}
-                    placeholder="0x10000"
-                    spellCheck={false}
-                    className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-neutral-500 ${isLocked ? 'border-neutral-800' : 'text-neutral-100'} ${isRecommended
-                      ? 'border-neutral-700 focus:border-blue-500'
-                      : 'border-amber-500/50 focus:border-amber-400'
-                      }`}
-                    disabled={isFlashing || isLocked}
-                  />
-                  {isLocked ? (
-                    <span className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-500">
-                      <Lock className="h-3.5 w-3.5" />
-                      Locked
-                    </span>
-                  ) : (
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setFlashAddress(recommended)}
-                      disabled={isRecommended}
-                      className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-start justify-between gap-3 rounded-lg bg-neutral-950/60 px-3 py-2.5 text-xs" title={addressAutoReason || undefined}>
-                <div className="min-w-0">
-                  <p className="text-neutral-500">Recommended</p>
-                  <p className="mt-0.5 text-neutral-400">
-                    {detected ? ADDRESS_HINTS[detected.kind] : 'Default for app-only files.'}
+            <div className="advanced-popup bg-neutral-900 rounded-xl shadow-2xl shadow-black/60 max-w-md w-full border border-neutral-800 max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="border-b border-neutral-800 px-6 py-4 flex justify-between items-start gap-4 flex-shrink-0">
+                <div>
+                  <h2 className="text-lg font-semibold text-neutral-100">Advanced Options</h2>
+                  <p className="mt-1 text-xs text-neutral-500">
+                    The flash address is set automatically from the file name.
                   </p>
                 </div>
-                <span className="flex-shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-300">
-                  {recommended}
-                </span>
+                <button
+                  onClick={() => setShowAdvanced(false)}
+                  title="Close"
+                  className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
 
-              {isLocked ? (
-                <p className="text-xs leading-relaxed text-neutral-400">
-                  This address can&apos;t be changed. A merged image contains the bootloader, partition table and
-                  app, so it must be written from 0x0.
-                </p>
-              ) : (
-                <p className="text-xs leading-relaxed text-red-400">
-                  This is an advanced option. Change it only if you know what you&apos;re doing. A wrong address
-                  can stop the device from booting.
-                </p>
-              )}
+              <div className="space-y-4 overflow-y-auto px-6 py-5">
+                <div>
+                  <label htmlFor="flashAddressInput" className="mb-1.5 block text-xs font-medium text-neutral-400">
+                    Flash address (hex)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="flashAddressInput"
+                      type="text"
+                      value={isLocked ? recommended : flashAddress}
+                      onChange={(e) => setFlashAddress(e.target.value)}
+                      onBlur={handleFlashAddressBlur}
+                      placeholder="0x10000"
+                      spellCheck={false}
+                      className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-neutral-500 ${isLocked ? 'border-neutral-800' : 'text-neutral-100'} ${isRecommended
+                        ? 'border-neutral-700 focus:border-blue-500'
+                        : 'border-amber-500/50 focus:border-amber-400'
+                        }`}
+                      disabled={isFlashing || isLocked}
+                    />
+                    {isLocked ? (
+                      <span className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-500">
+                        <Lock className="h-3.5 w-3.5" />
+                        Locked
+                      </span>
+                    ) : (
+                      <button
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => setFlashAddress(recommended)}
+                        disabled={isRecommended}
+                        className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-start justify-between gap-3 rounded-lg bg-neutral-950/60 px-3 py-2.5 text-xs" title={addressAutoReason || undefined}>
+                  <div className="min-w-0">
+                    <p className="text-neutral-500">Recommended</p>
+                    <p className="mt-0.5 text-neutral-400">
+                      {detected ? ADDRESS_HINTS[detected.kind] : 'Default for app-only files.'}
+                    </p>
+                  </div>
+                  <span className="flex-shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-300">
+                    {recommended}
+                  </span>
+                </div>
+
+                {isLocked ? (
+                  <p className="text-xs leading-relaxed text-neutral-400">
+                    This address can&apos;t be changed. A merged image contains the bootloader, partition table and
+                    app, so it must be written from 0x0.
+                  </p>
+                ) : (
+                  <p className="text-xs leading-relaxed text-red-400">
+                    Change it only if you know what you&apos;re doing. A wrong address can stop the device from booting.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-neutral-800 px-6 py-4 flex justify-end flex-shrink-0">
+                <button
+                  onClick={() => setShowAdvanced(false)}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         );
       })()}
 
       {/* Small screens: flashing lives in a footer that stays at the bottom */}
-      <footer className="mobile-flash-bar desk:hidden fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-neutral-800 bg-neutral-950/95 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur">
+      <footer className="mobile-flash-bar desk:hidden fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-emerald-500/25 bg-neutral-950/95 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur">
         {/* Selected firmware takes the free space */}
         {firmwareFile ? (
           <div className="flex h-10 min-w-0 flex-1 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/5 pl-2.5 pr-1">
@@ -2473,8 +2474,8 @@ export default function ESP32Flasher() {
             </button>
           </div>
         ) : (
-          <div className="flex h-10 min-w-0 flex-1 items-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 px-2.5">
-            <p className="truncate text-xs text-neutral-400">No firmware selected</p>
+          <div className="flex h-10 min-w-0 flex-1 items-center rounded-lg border border-dashed border-emerald-500/30 bg-emerald-500/[0.04] px-2.5">
+            <p className="truncate text-xs text-neutral-300">No firmware selected</p>
           </div>
         )}
 
@@ -2486,25 +2487,25 @@ export default function ESP32Flasher() {
           title={selectedIsMergedImage ? 'Flash Complete Firmware: not needed for merged images' : 'Flash Complete Firmware'}
           className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border disabled:cursor-not-allowed disabled:opacity-40 transition-colors ${flashFullFirmware
             ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
-            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'
+            : 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'
             }`}
         >
           <Layers className="h-4 w-4" />
         </button>
         <button
-          onClick={(e) => toggleAdvanced(e.currentTarget)}
+          onClick={() => setShowAdvanced(true)}
           disabled={isFlashing || flashFullFirmware}
           aria-label="Advanced Options"
           title="Advanced Options"
           className={`advanced-toggle flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border disabled:cursor-not-allowed disabled:opacity-40 transition-colors ${showAdvanced
-            ? 'border-neutral-500 bg-neutral-800 text-neutral-100'
-            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'
+            ? 'border-blue-400/60 bg-blue-500/25 text-blue-100'
+            : 'border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20'
             }`}
         >
           <SlidersHorizontal className="h-4 w-4" />
         </button>
         {renderFlashButton(
-          'h-10 w-[4.75rem] flex-shrink-0 px-2',
+          'h-10 w-[5.75rem] flex-shrink-0 px-2',
           isFlashing
             ? `${progress}%`
             : flashResult === 'done' ? 'Done' : flashResult === 'press-reset' ? 'RESET' : 'Flash'
@@ -2582,7 +2583,7 @@ export default function ESP32Flasher() {
           <div
             className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
             onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setShowFullFlashDialog(false);
+              if (e.target === e.currentTarget) closeFullFlashDialog();
             }}
           >
             <div className="bg-neutral-900 rounded-xl shadow-2xl shadow-black/60 max-w-lg w-full border border-neutral-800 max-h-[85vh] flex flex-col overflow-hidden">
@@ -2594,7 +2595,7 @@ export default function ESP32Flasher() {
                   </p>
                 </div>
                 <button
-                  onClick={() => setShowFullFlashDialog(false)}
+                  onClick={closeFullFlashDialog}
                   title="Close"
                   className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
                 >
@@ -2690,7 +2691,7 @@ export default function ESP32Flasher() {
                   {readyCount === 3 ? 'All 3 files ready' : `${readyCount} of 3 ready`}
                 </p>
                 <button
-                  onClick={() => setShowFullFlashDialog(false)}
+                  onClick={closeFullFlashDialog}
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
                 >
                   Done
@@ -2740,8 +2741,6 @@ export default function ESP32Flasher() {
           </div>
         </div>
       )}
-
-      <AppTour autoStart={false} />
     </div>
   );
 }
