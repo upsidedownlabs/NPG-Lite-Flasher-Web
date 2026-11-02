@@ -20,18 +20,26 @@
  * layout always fits: whichever of width and height is tighter decides, and
  * text and panels grow or shrink together.
  *
- * Narrow or portrait windows (half a screen, phones): normal 16px text, panels
- * stacked in one column, and the page scrolls. Landscape windows, like scaled
- * laptops, stay on one screen. The `desk:` variant below marks the classes that
- * apply only to the one-screen layout.
+ * Narrow, portrait or short windows (half a screen, phones, a window made
+ * much shorter than it is wide): normal 16px text, panels stacked in one
+ * column with the flash footer, and the page scrolls. Landscape windows, like
+ * scaled laptops, stay on one screen. The `desk:` variant below marks the
+ * classes that apply only to the one-screen layout.
+ *
+ * The one-screen layout needs at least 36rem of height, so it's used only
+ * while that still leaves readable text:
+ *   - min-height 432px: 36rem at 12px text.
+ *   - max-aspect-ratio 37/10: a window more than 3.7 times wider than it is
+ *     tall switches too, since its height would shrink the text far below
+ *     what its width allows.
  */
 @custom-variant desk {
-  @media (min-width: 1200px) and (min-height: 340px), (min-width: 800px) and (min-height: 340px) and (min-aspect-ratio: 4/3) {
+  @media (min-width: 1200px) and (min-height: 432px) and (max-aspect-ratio: 37/10), (min-width: 800px) and (min-height: 432px) and (min-aspect-ratio: 4/3) and (max-aspect-ratio: 37/10) {
     @slot;
   }
 }
 
-@media (min-width: 1200px) and (min-height: 340px), (min-width: 800px) and (min-height: 340px) and (min-aspect-ratio: 4/3) {
+@media (min-width: 1200px) and (min-height: 432px) and (max-aspect-ratio: 37/10), (min-width: 800px) and (min-height: 432px) and (min-aspect-ratio: 4/3) and (max-aspect-ratio: 37/10) {
   html {
     /* Normally a 100rem x 50rem canvas. Scaled laptops have small windows, so
        up to 12px the layout may tighten to its real minimum of 85rem x 36rem

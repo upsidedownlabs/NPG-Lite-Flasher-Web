@@ -156,7 +156,8 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   };
 
   return (
-    <div className="fixed bottom-2 right-6 z-40 flex flex-col gap-2">
+    // On small screens it sits above the flash footer instead of covering it
+    <div className="fixed bottom-[calc(3.875rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] right-4 desk:bottom-2 desk:right-6 z-40 flex flex-col gap-2">
       <button
         onClick={startTour}
         className="flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-900/40 backdrop-blur transition-colors hover:bg-blue-500"

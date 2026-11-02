@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ESPLoader, Transport } from 'esptool-js';
 import { AppTour } from './components/AppTour';
-import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, ChevronRight, FileText, CloudDownload, Trash2, ChevronDown, Info, Lock } from 'lucide-react';
+import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, ChevronRight, FileText, CloudDownload, Trash2, ChevronDown, Info, Lock, Layers, SlidersHorizontal } from 'lucide-react';
 
 // IndexedDB utility functions
 const DB_NAME = 'ESP32FlasherDB';
@@ -445,12 +445,25 @@ const ADDRESS_HINTS: Record<AddressKind, string> = {
 // so scrolling panels can't clip it.
 const InfoButton = ({ label, children }: { label: string; children: React.ReactNode }) => {
   const [pos, setPos] = useState<React.CSSProperties | null>(null);
+  // Hovering shows the popover until the pointer leaves; a click pins it open
+  const [pinned, setPinned] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelHide = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  };
+
+  useEffect(() => cancelHide, []);
 
   useEffect(() => {
     if (!pos) return;
-    const close = () => setPos(null);
+    const close = () => {
+      setPos(null);
+      setPinned(false);
+    };
     const onMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (!popoverRef.current?.contains(target) && !buttonRef.current?.contains(target)) close();
@@ -474,18 +487,38 @@ const InfoButton = ({ label, children }: { label: string; children: React.ReactN
     };
   }, [pos]);
 
-  const toggle = () => {
+  const placePopover = (): React.CSSProperties | null => {
     const rect = buttonRef.current?.getBoundingClientRect();
-    if (pos || !rect) {
-      setPos(null);
-      return;
-    }
+    if (!rect) return null;
     const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - 18 * rem - 8));
     // Open upward from the lower part of the window
-    setPos(rect.bottom > window.innerHeight * 0.6
+    return rect.bottom > window.innerHeight * 0.6
       ? { left, bottom: window.innerHeight - rect.top + 6 }
-      : { left, top: rect.bottom + 6 });
+      : { left, top: rect.bottom + 6 };
+  };
+
+  const show = () => {
+    cancelHide();
+    if (!pos) setPos(placePopover());
+  };
+
+  // A short delay lets the pointer cross the gap from the button to the popover
+  const hideSoon = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'mouse' || pinned) return;
+    cancelHide();
+    hideTimer.current = setTimeout(() => setPos(null), 150);
+  };
+
+  const toggle = () => {
+    cancelHide();
+    if (pinned) {
+      setPinned(false);
+      setPos(null);
+    } else {
+      setPinned(true);
+      if (!pos) setPos(placePopover());
+    }
   };
 
   return (
@@ -494,18 +527,25 @@ const InfoButton = ({ label, children }: { label: string; children: React.ReactN
         ref={buttonRef}
         type="button"
         onClick={toggle}
+        onPointerEnter={(e) => e.pointerType === 'mouse' && show()}
+        onPointerLeave={hideSoon}
+        onFocus={show}
+        onBlur={() => !pinned && setPos(null)}
         aria-label={`About ${label}`}
         aria-expanded={!!pos}
-        title={`About ${label}`}
-        className={`flex-shrink-0 rounded-md p-0.5 transition-colors hover:bg-neutral-800 hover:text-neutral-200 ${pos ? 'text-neutral-200' : 'text-neutral-500'}`}
+        className={`flex-shrink-0 rounded-full transition-colors hover:text-neutral-100 ${pos ? 'text-neutral-100' : 'text-neutral-400'}`}
       >
-        <Info className="h-3.5 w-3.5" />
+        {/* A slightly larger, bolder icon than the text around it stays sharp
+            when the page scales to small sizes */}
+        <Info className="h-4 w-4" strokeWidth={2.25} />
       </button>
       {pos && (
         <div
           ref={popoverRef}
           role="tooltip"
           style={pos}
+          onPointerEnter={cancelHide}
+          onPointerLeave={hideSoon}
           className="fixed z-50 w-[18rem] rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-left font-sans text-xs font-normal leading-relaxed text-neutral-300 shadow-2xl shadow-black/60"
         >
           {children}
@@ -831,9 +871,7 @@ export default function ESP32Flasher() {
 
       if (
         showAdvanced &&
-        advancedButtonRef.current &&
-        !advancedButtonRef.current.contains(target) &&
-        !(el instanceof Element && el.closest('.advanced-popup'))
+        !(el instanceof Element && el.closest('.advanced-popup, .advanced-toggle'))
       ) {
         setShowAdvanced(false);
       }
@@ -1683,27 +1721,82 @@ export default function ESP32Flasher() {
     f => /partition/i.test(f.name) && !isMergedImageName(f.name)
   );
 
+  const flashDisabled =
+    !isConnected ||
+    isFlashing ||
+    (flashFullFirmware ? !bootloaderFile || !partitionTableFile || !firmwareFile : !firmwareFile);
+  const flashLabel = isFlashing
+    ? (progress >= 99 ? 'Resetting device... 99%' : `Flashing... ${progress}%`)
+    : flashResult === 'done'
+      ? 'Flash complete 100%'
+      : flashResult === 'press-reset'
+        ? 'Press RESET on the device 99%'
+        : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware';
+  const fullFlashReadyCount = [bootloaderFile, partitionTableFile, firmwareFile].filter(Boolean).length;
+
+  // Both the desktop panel and the mobile footer have an Advanced Options button
+  const toggleAdvanced = (button: HTMLElement) => {
+    const rect = button.getBoundingClientRect();
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const width = Math.min(22 * rem, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    setAdvancedPopupPos({ left, bottom: window.innerHeight - rect.top + 8 });
+    setShowAdvanced(!showAdvanced);
+  };
+
+  const toggleFullFlash = () => {
+    const next = !flashFullFirmware;
+    setFlashFullFirmware(next);
+    setShowFullFlashDialog(next);
+  };
+
+  const renderFlashButton = (className: string, label: string = flashLabel) => (
+    <button
+      onClick={flashFirmware}
+      disabled={flashDisabled}
+      className={`relative min-w-0 overflow-hidden bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors ${className}`}
+    >
+      {/* Progress fills the button while flashing */}
+      {(isFlashing || flashResult) && (
+        <span
+          className="progress-section absolute inset-y-0 left-0 bg-emerald-500/40 transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      )}
+      <span className={`relative block truncate whitespace-nowrap ${isFlashing || flashResult ? 'text-neutral-100 tabular-nums' : ''}`}>
+        {label}
+      </span>
+    </button>
+  );
+
   return (
-    <div className="min-h-dvh desk:h-dvh desk:overflow-hidden flex flex-col gap-4 bg-neutral-950 bg-[radial-gradient(ellipse_at_top_left,rgba(37,99,235,0.18),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(124,58,237,0.14),transparent_55%)] text-neutral-100 p-4">
-      {/* Navbar: app name + device connection */}
-      <header className="-mx-4 -mt-4 flex flex-wrap items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950/70 px-6 py-3 backdrop-blur">
+    <div className="min-h-dvh desk:h-dvh desk:overflow-hidden flex flex-col gap-4 bg-neutral-950 bg-[radial-gradient(ellipse_at_top_left,rgba(37,99,235,0.18),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(124,58,237,0.14),transparent_55%)] text-neutral-100 p-4 pb-[calc(4.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] desk:pb-4">
+      {/* Navbar: app name + device connection. Small screens get one compact
+          line: title, GitHub, Connect, and a dot for the connection status. */}
+      <header className="-mx-4 -mt-4 flex items-center justify-between gap-2 desk:gap-4 border-b border-neutral-800 bg-neutral-950/70 px-4 py-2.5 desk:px-6 desk:py-3 backdrop-blur">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold tracking-tight text-neutral-50">Neuro PlayGround (NPG) Lite Firmware Flasher</h1>
-          <p className="truncate text-xs text-neutral-500">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
+          <h1 className="truncate text-base desk:text-lg font-semibold tracking-tight text-neutral-50">
+            <span className="desk:hidden">NPG Lite Firmware Flasher</span>
+            <span className="hidden desk:inline">Neuro PlayGround (NPG) Lite Firmware Flasher</span>
+          </h1>
+          <p className="hidden desk:block truncate text-xs text-neutral-500">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
         </div>
-        <div className="connection-section flex items-center gap-3">
+        <div className="connection-section flex flex-shrink-0 items-center gap-2 desk:gap-3">
           <a
             href={FLASHER_REPO_URL}
             target="_blank"
             rel="noopener noreferrer"
             title="NPG Lite Flasher on GitHub"
-            className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 transition-colors"
+            className="rounded-lg p-1.5 desk:p-2 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 transition-colors"
           >
             <GithubMark className="h-5 w-5" />
           </a>
-          <div className="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs">
-            <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
-            <span className={isConnected ? 'text-neutral-200' : 'text-neutral-400'}>
+          <div
+            title={isConnected ? `${chipInfo || 'Device'} connected` : 'Not connected'}
+            className="order-last desk:order-none flex items-center gap-2 desk:rounded-full desk:border desk:border-neutral-800 desk:bg-neutral-900 desk:px-3 desk:py-1.5 text-xs"
+          >
+            <span className={`h-2.5 w-2.5 desk:h-2 desk:w-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
+            <span className={`hidden desk:inline ${isConnected ? 'text-neutral-200' : 'text-neutral-400'}`}>
               {isConnected ? `${chipInfo || 'Device'} connected` : 'Not connected'}
             </span>
           </div>
@@ -1711,15 +1804,15 @@ export default function ESP32Flasher() {
             <button
               onClick={connectToDevice}
               disabled={isFlashing}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
+              className="whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-xs desk:text-sm font-semibold shadow-sm transition-colors"
             >
-              Connect Device
+              Connect<span className="hidden desk:inline"> Device</span>
             </button>
           ) : (
             <button
               onClick={disconnectDevice}
               disabled={isFlashing}
-              className="px-4 py-2 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 disabled:cursor-not-allowed disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              className="whitespace-nowrap px-3 py-1.5 desk:px-4 desk:py-2 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 disabled:cursor-not-allowed disabled:opacity-50 rounded-lg text-xs desk:text-sm font-medium transition-colors"
             >
               Disconnect
             </button>
@@ -2093,7 +2186,8 @@ export default function ESP32Flasher() {
 
         {/* Right: flashing on top, console below */}
         <main className="contents desk:flex desk:flex-1 desk:min-w-0 desk:min-h-0 desk:flex-col desk:gap-4">
-          <section className="flash-panel order-1 desk:order-none flex-none desk:overflow-y-auto desk:flex-none custom-scrollbar bg-neutral-900/60 rounded-xl border border-neutral-800 p-5 space-y-3">
+          {/* On small screens this panel is replaced by the footer below */}
+          <section className="flash-panel hidden desk:block flex-none desk:overflow-y-auto custom-scrollbar bg-neutral-900/60 rounded-xl border border-neutral-800 p-5 space-y-3">
             <div className="flex items-center gap-1.5">
               <h2 className="text-base font-semibold text-neutral-100">Flash Firmware</h2>
               <InfoButton label="flashing firmware">
@@ -2136,7 +2230,7 @@ export default function ESP32Flasher() {
               )}
             </div>
 
-            <div className="full-flash-option flex items-start gap-3 px-4 py-3 min-h-[8.5rem] sm:min-h-[6.25rem] desk:min-h-0 desk:h-[6.25rem] desk:overflow-hidden bg-neutral-950/50 rounded-lg border border-neutral-800">
+            <div className="full-flash-option flex items-start gap-3 px-4 py-3 h-[6.25rem] overflow-hidden bg-neutral-950/50 rounded-lg border border-neutral-800">
               <div className="relative flex items-center mt-0.5">
                 <input
                   type="checkbox"
@@ -2211,141 +2305,21 @@ export default function ESP32Flasher() {
             <div className="flash-address-section relative flex-shrink-0">
               <button
                 ref={advancedButtonRef}
-                onClick={() => {
-                  const rect = advancedButtonRef.current?.getBoundingClientRect();
-                  if (rect) setAdvancedPopupPos({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
-                  setShowAdvanced(!showAdvanced);
-                }}
+                onClick={(e) => toggleAdvanced(e.currentTarget)}
                 disabled={isFlashing || flashFullFirmware}
-                className="flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="advanced-toggle flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <ChevronRight className={`h-4 w-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
                 Advanced Options
               </button>
-
-              {showAdvanced && !isFlashing && !flashFullFirmware && advancedPopupPos && (() => {
-                const detected = firmwareFile ? detectAddressForFilename(firmwareFile.name) : null;
-                const recommended = detected?.address ?? '0x10000';
-                // A merged image only works at 0x0, so its address can't be edited
-                const isLocked = detected?.kind === 'merged';
-                const isRecommended = isLocked || flashAddress.trim().toLowerCase() === recommended.toLowerCase();
-                return (
-                  <div
-                    className="advanced-popup fixed z-50 w-[22rem] overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
-                    style={{ left: advancedPopupPos.left, bottom: advancedPopupPos.bottom }}
-                  >
-                    <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-                      <h3 className="text-sm font-semibold text-neutral-100">Advanced Options</h3>
-                      <button
-                        onClick={() => setShowAdvanced(false)}
-                        title="Close"
-                        className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 p-4">
-                      <div>
-                        <label htmlFor="flashAddressInput" className="mb-1.5 block text-xs font-medium text-neutral-400">
-                          Flash address (hex)
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            id="flashAddressInput"
-                            type="text"
-                            value={isLocked ? recommended : flashAddress}
-                            onChange={(e) => setFlashAddress(e.target.value)}
-                            onBlur={handleFlashAddressBlur}
-                            placeholder="0x10000"
-                            spellCheck={false}
-                            className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-neutral-500 ${isLocked ? 'border-neutral-800' : 'text-neutral-100'} ${isRecommended
-                              ? 'border-neutral-700 focus:border-blue-500'
-                              : 'border-amber-500/50 focus:border-amber-400'
-                              }`}
-                            disabled={isFlashing || isLocked}
-                          />
-                          {isLocked ? (
-                            <span className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-500">
-                              <Lock className="h-3.5 w-3.5" />
-                              Locked
-                            </span>
-                          ) : (
-                            <button
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => setFlashAddress(recommended)}
-                              disabled={isRecommended}
-                              className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
-                            >
-                              Reset
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex items-start justify-between gap-3 rounded-lg bg-neutral-950/60 px-3 py-2.5 text-xs" title={addressAutoReason || undefined}>
-                        <div className="min-w-0">
-                          <p className="text-neutral-500">Recommended</p>
-                          <p className="mt-0.5 text-neutral-400">
-                            {detected ? ADDRESS_HINTS[detected.kind] : 'Default for app-only files.'}
-                          </p>
-                        </div>
-                        <span className="flex-shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-300">
-                          {recommended}
-                        </span>
-                      </div>
-
-                      {isLocked ? (
-                        <p className="text-xs leading-relaxed text-neutral-400">
-                          This address can&apos;t be changed. A merged image contains the bootloader, partition table and
-                          app, so it must be written from 0x0.
-                        </p>
-                      ) : (
-                        <p className="text-xs leading-relaxed text-red-400">
-                          This is an advanced option. Change it only if you know what you&apos;re doing. A wrong address
-                          can stop the device from booting.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
             </div>
 
-            {/* Flash Button */}
-            <button
-              onClick={flashFirmware}
-              disabled={
-                !isConnected ||
-                isFlashing ||
-                (flashFullFirmware
-                  ? !bootloaderFile || !partitionTableFile || !firmwareFile
-                  : !firmwareFile)
-              }
-              className="flash-button relative min-w-0 flex-1 overflow-hidden px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
-            >
-              {/* Progress fills the button while flashing */}
-              {(isFlashing || flashResult) && (
-                <span
-                  className="progress-section absolute inset-y-0 left-0 bg-emerald-500/40 transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              )}
-              <span className={`relative block truncate whitespace-nowrap ${isFlashing || flashResult ? 'text-neutral-100 tabular-nums' : ''}`}>
-                {isFlashing
-                  ? (progress >= 99 ? 'Resetting device... 99%' : `Flashing... ${progress}%`)
-                  : flashResult === 'done'
-                    ? 'Flash complete 100%'
-                    : flashResult === 'press-reset'
-                      ? 'Press RESET on the device 99%'
-                      : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware'}
-              </span>
-            </button>
+            {renderFlashButton('flash-button flex-1 px-6 py-2.5')}
             </div>
           </section>
 
           <section
-          className="console-section order-6 desk:order-none flex-none relative h-[28rem] desk:h-auto desk:flex-1 desk:min-h-0 flex flex-col bg-neutral-900/60 rounded-xl "
+          className="console-section order-6 desk:order-none flex-none relative h-[16rem] desk:h-auto desk:flex-1 desk:min-h-0 flex flex-col bg-neutral-900/60 rounded-xl "
           >
             {/* Clear, pinned to the console's top-right corner */}
             <div className="absolute right-3 top-2.5 z-10 flex items-center gap-1.5">
@@ -2376,6 +2350,166 @@ export default function ESP32Flasher() {
           </section>
         </main>
       </div>
+
+      {/* Advanced Options popup, opened from the desktop panel or the mobile footer */}
+      {showAdvanced && !isFlashing && !flashFullFirmware && advancedPopupPos && (() => {
+        const detected = firmwareFile ? detectAddressForFilename(firmwareFile.name) : null;
+        const recommended = detected?.address ?? '0x10000';
+        // A merged image only works at 0x0, so its address can't be edited
+        const isLocked = detected?.kind === 'merged';
+        const isRecommended = isLocked || flashAddress.trim().toLowerCase() === recommended.toLowerCase();
+        return (
+          <div
+            className="advanced-popup fixed z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
+            style={{ left: advancedPopupPos.left, bottom: advancedPopupPos.bottom }}
+          >
+            <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+              <h3 className="text-sm font-semibold text-neutral-100">Advanced Options</h3>
+              <button
+                onClick={() => setShowAdvanced(false)}
+                title="Close"
+                className="rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 p-4">
+              <div>
+                <label htmlFor="flashAddressInput" className="mb-1.5 block text-xs font-medium text-neutral-400">
+                  Flash address (hex)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="flashAddressInput"
+                    type="text"
+                    value={isLocked ? recommended : flashAddress}
+                    onChange={(e) => setFlashAddress(e.target.value)}
+                    onBlur={handleFlashAddressBlur}
+                    placeholder="0x10000"
+                    spellCheck={false}
+                    className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-neutral-500 ${isLocked ? 'border-neutral-800' : 'text-neutral-100'} ${isRecommended
+                      ? 'border-neutral-700 focus:border-blue-500'
+                      : 'border-amber-500/50 focus:border-amber-400'
+                      }`}
+                    disabled={isFlashing || isLocked}
+                  />
+                  {isLocked ? (
+                    <span className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-500">
+                      <Lock className="h-3.5 w-3.5" />
+                      Locked
+                    </span>
+                  ) : (
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setFlashAddress(recommended)}
+                      disabled={isRecommended}
+                      className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 rounded-lg bg-neutral-950/60 px-3 py-2.5 text-xs" title={addressAutoReason || undefined}>
+                <div className="min-w-0">
+                  <p className="text-neutral-500">Recommended</p>
+                  <p className="mt-0.5 text-neutral-400">
+                    {detected ? ADDRESS_HINTS[detected.kind] : 'Default for app-only files.'}
+                  </p>
+                </div>
+                <span className="flex-shrink-0 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-300">
+                  {recommended}
+                </span>
+              </div>
+
+              {isLocked ? (
+                <p className="text-xs leading-relaxed text-neutral-400">
+                  This address can&apos;t be changed. A merged image contains the bootloader, partition table and
+                  app, so it must be written from 0x0.
+                </p>
+              ) : (
+                <p className="text-xs leading-relaxed text-red-400">
+                  This is an advanced option. Change it only if you know what you&apos;re doing. A wrong address
+                  can stop the device from booting.
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Small screens: flashing lives in a footer that stays at the bottom */}
+      <footer className="mobile-flash-bar desk:hidden fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-neutral-800 bg-neutral-950/95 px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur">
+        {/* Selected firmware takes the free space */}
+        {firmwareFile ? (
+          <div className="flex h-10 min-w-0 flex-1 items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/5 pl-2.5 pr-1">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-emerald-300" title={firmwareFile.name}>{firmwareFile.name}</p>
+              {flashFullFirmware ? (
+                <button
+                  onClick={() => setShowFullFlashDialog(true)}
+                  disabled={isFlashing}
+                  className={`block truncate text-[0.6875rem] ${fullFlashReadyCount === 3 ? 'text-emerald-400' : 'text-amber-300'} disabled:opacity-50`}
+                >
+                  {fullFlashReadyCount} of 3 files
+                </button>
+              ) : (
+                <p className="truncate text-[0.6875rem] text-neutral-500">{(firmwareFile.size / 1024).toFixed(1)} KB</p>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                if (isFlashing) return;
+                setFirmwareFile(null);
+                setSelectedDefaultFirmware('');
+              }}
+              disabled={isFlashing}
+              title="Clear selection"
+              className="flex-shrink-0 rounded-md p-1 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex h-10 min-w-0 flex-1 items-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 px-2.5">
+            <p className="truncate text-xs text-neutral-400">No firmware selected</p>
+          </div>
+        )}
+
+        <button
+          onClick={toggleFullFlash}
+          disabled={isFlashing || selectedIsMergedImage}
+          aria-pressed={flashFullFirmware}
+          aria-label="Flash Complete Firmware"
+          title={selectedIsMergedImage ? 'Flash Complete Firmware: not needed for merged images' : 'Flash Complete Firmware'}
+          className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border disabled:cursor-not-allowed disabled:opacity-40 transition-colors ${flashFullFirmware
+            ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300'
+            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'
+            }`}
+        >
+          <Layers className="h-4 w-4" />
+        </button>
+        <button
+          onClick={(e) => toggleAdvanced(e.currentTarget)}
+          disabled={isFlashing || flashFullFirmware}
+          aria-label="Advanced Options"
+          title="Advanced Options"
+          className={`advanced-toggle flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border disabled:cursor-not-allowed disabled:opacity-40 transition-colors ${showAdvanced
+            ? 'border-neutral-500 bg-neutral-800 text-neutral-100'
+            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800'
+            }`}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+        </button>
+        {renderFlashButton(
+          'h-10 w-[4.75rem] flex-shrink-0 px-2',
+          isFlashing
+            ? `${progress}%`
+            : flashResult === 'done' ? 'Done' : flashResult === 'press-reset' ? 'RESET' : 'Flash'
+        )}
+      </footer>
 
       {/* Hidden file input */}
       <input
