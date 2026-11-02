@@ -15,7 +15,9 @@ Flash firmware to your Neuro PlayGround (NPG) Lite straight from the browser. No
 - **Automatic flash address:** merged images go to `0x0` and app-only files to `0x10000`, so you don't have to remember offsets.
 - **Flash Complete Firmware:** write the bootloader, partition table and app together, for a blank chip or a new partition scheme.
 - **Live console** that shows every step of connecting and flashing.
-- **Guided tour** that walks you through the page.
+- **Help on every section:** hover over or click the **i** button next to a section's title for a short explanation.
+- **Guided tour:** the **Guide** button in the navbar walks you through the page.
+- **Works on small screens:** in a narrow or short window, the panels stack in one column and flashing moves to a bar at the bottom of the screen.
 
 ## Requirements
 
@@ -27,7 +29,6 @@ Flash firmware to your Neuro PlayGround (NPG) Lite straight from the browser. No
 | Chrome, Edge, Opera | Yes |
 | Firefox | Yes, from version 151 |
 | Safari | No |
-| Mobile browsers | No |
 
 The page must be opened over HTTPS (as on the link above) or from `localhost`.
 
@@ -35,11 +36,11 @@ The page must be opened over HTTPS (as on the link above) or from `localhost`.
 
 1. Connect the NPG Lite to your computer with a USB cable.
 2. Click **Connect Device** and choose the board's serial port in the browser's pop-up.
-3. Pick a firmware from one of the lists on the left:
+3. Pick a firmware from one of the lists:
    - **Chords firmwares:** Chords BLE, Chords WiFi or Chords Serial.
    - **NPG Lite projects:** click a project to download and select it.
    - **Your firmwares:** a file you added yourself.
-4. Click **Flash Firmware** and wait for it to reach 100%. Don't unplug the board while it's flashing.
+4. Click **Flash Firmware** (**Flash** in the bar at the bottom on small screens) and wait for it to reach 100%. Don't unplug the board while it's flashing.
 5. If the board doesn't start the new firmware on its own, press its RESET button, or unplug and replug the USB cable.
 
 ## Merged images and Flash Complete Firmware
@@ -63,7 +64,8 @@ If you flash an app-only file, the board keeps its existing bootloader and parti
 
 In Arduino IDE, **Sketch > Export Compiled Binary** creates these files in the sketch's `build` folder.
 
-**Advanced Options** lets you change the flash address of a single file. Only do this if you know the address your file needs: a wrong address can stop the board from booting.
+**Advanced Options** opens a dialog where you can change the flash address of a single file. Only do this if you know the address your file needs: a wrong address can stop the board from booting. The address of a merged image is locked at `0x0`, and Advanced Options isn't available while Flash Complete Firmware is on.
+
 
 ## Troubleshooting
 
