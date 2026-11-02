@@ -26,7 +26,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.firmware-selection',
         popover: {
           title: 'Firmware sources',
-          description: 'Every firmware you can flash is listed here: the default builds, NPG Lite projects from GitHub, and files you add yourself. Click one to select it.',
+          description: 'Every firmware you can flash is listed here: the Chords firmwares, NPG Lite projects from GitHub, and files you add yourself. Click one to select it.',
           side: 'right' as const,
           align: 'start' as const,
         },
@@ -34,8 +34,8 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.default-firmwares-section',
         popover: {
-          title: 'Default firmwares',
-          description: 'The standard BLE, WiFi and Serial builds, downloaded from the latest Chords-Arduino-Firmware release and kept up to date automatically.',
+          title: 'Chords firmwares',
+          description: 'Three firmwares for Chords Web and Chords Python: Chords BLE, Chords WiFi and Chords Serial. Pick the one for how you want to connect. They come from the latest Chords-Arduino-Firmware release and stay up to date automatically.',
           side: 'right' as const,
           align: 'start' as const,
         },

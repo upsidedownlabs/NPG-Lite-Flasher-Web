@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { ESPLoader, Transport } from 'esptool-js';
 import { AppTour } from './components/AppTour';
-import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, ChevronRight, FileText, CloudDownload, Trash2, ChevronDown } from 'lucide-react';
+import { FileDown, Bluetooth, Wifi, Usb, Loader2, Plus, X, Check, ChevronRight, FileText, CloudDownload, Trash2, ChevronDown, Info, Lock } from 'lucide-react';
 
 // IndexedDB utility functions
 const DB_NAME = 'ESP32FlasherDB';
@@ -441,6 +441,80 @@ const ADDRESS_HINTS: Record<AddressKind, string> = {
   app: 'App-only file, written to the app partition.',
 };
 
+// Small "i" button that explains a section. The popover is fixed to the window
+// so scrolling panels can't clip it.
+const InfoButton = ({ label, children }: { label: string; children: React.ReactNode }) => {
+  const [pos, setPos] = useState<React.CSSProperties | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!popoverRef.current?.contains(target) && !buttonRef.current?.contains(target)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    // Close if the button moves; other scrolling (like the console) is ignored
+    const onScroll = (e: Event) => {
+      if (e.target === document || (e.target instanceof Node && e.target.contains(buttonRef.current))) close();
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [pos]);
+
+  const toggle = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (pos || !rect) {
+      setPos(null);
+      return;
+    }
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - 18 * rem - 8));
+    // Open upward from the lower part of the window
+    setPos(rect.bottom > window.innerHeight * 0.6
+      ? { left, bottom: window.innerHeight - rect.top + 6 }
+      : { left, top: rect.bottom + 6 });
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={toggle}
+        aria-label={`About ${label}`}
+        aria-expanded={!!pos}
+        title={`About ${label}`}
+        className={`flex-shrink-0 rounded-md p-0.5 transition-colors hover:bg-neutral-800 hover:text-neutral-200 ${pos ? 'text-neutral-200' : 'text-neutral-500'}`}
+      >
+        <Info className="h-3.5 w-3.5" />
+      </button>
+      {pos && (
+        <div
+          ref={popoverRef}
+          role="tooltip"
+          style={pos}
+          className="fixed z-50 w-[18rem] rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-left font-sans text-xs font-normal leading-relaxed text-neutral-300 shadow-2xl shadow-black/60"
+        >
+          {children}
+        </div>
+      )}
+    </>
+  );
+};
+
 const GithubMark = ({ className }: { className?: string }) => (
   <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
     <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
@@ -454,6 +528,8 @@ export default function ESP32Flasher() {
   const [isConnected, setIsConnected] = useState(false);
   const [isFlashing, setIsFlashing] = useState(false);
   const [progress, setProgress] = useState(0);
+  // How the last flash ended: 'done' once the device was reset, 'press-reset' if it couldn't be
+  const [flashResult, setFlashResult] = useState<'done' | 'press-reset' | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [firmwareFile, setFirmwareFile] = useState<File | null>(null);
   const [chipInfo, setChipInfo] = useState<string>('');
@@ -517,6 +593,7 @@ export default function ESP32Flasher() {
   // download, Local Firmwares "Load", or manual "Add Firmware" upload) so
   // the behavior is consistent everywhere a firmware gets selected.
   useEffect(() => {
+    setFlashResult(null);
     if (!firmwareFile) {
       setAddressAutoReason('');
       return;
@@ -650,11 +727,11 @@ export default function ESP32Flasher() {
         if (existing && !isStale) continue;
 
         addLog(isStale
-          ? `New pre-built release ${latestTag} available - updating ${firmware.type.toUpperCase()} firmware...`
-          : `Loading default ${firmware.type.toUpperCase()} firmware...`);
+          ? `New Chords release ${latestTag} available - updating Chords ${firmware.type.toUpperCase()} firmware...`
+          : `Loading Chords ${firmware.type.toUpperCase()} firmware...`);
         const result = await fetchDefaultFirmwareData(firmware, latestTag);
         if (!result) {
-          addLog(`Warning: Could not load default ${firmware.type.toUpperCase()} firmware`);
+          addLog(`Warning: Could not load Chords ${firmware.type.toUpperCase()} firmware`);
           continue;
         }
         await saveFirmwareToDB(firmware.name, result.data, firmware.type, result.version);
@@ -665,7 +742,7 @@ export default function ESP32Flasher() {
       setLocalFirmwares(await getAllFirmwaresFromDB());
 
       if (loadedCount > 0) {
-        addLog(`✓ Loaded ${loadedCount} default firmware(s)`);
+        addLog(`✓ Loaded ${loadedCount} Chords firmware(s)`);
       }
     } finally {
       setIsLoadingDefaults(false);
@@ -682,7 +759,7 @@ export default function ESP32Flasher() {
     setSelectedDefaultFirmware(type);
 
     try {
-      addLog(`Selecting ${firmwareInfo.type.toUpperCase()} firmware...`);
+      addLog(`Selecting Chords ${firmwareInfo.type.toUpperCase()} firmware...`);
 
       // Check if already in storage
       const existing = localFirmwares.find(f => f.name === firmwareInfo.name);
@@ -805,6 +882,7 @@ export default function ESP32Flasher() {
         return;
       }
 
+      setFlashResult(null);
       addLog('Requesting serial port access...');
       const port = await navigatorWithSerial.serial.requestPort();
       addLog('Connecting to ESP32...');
@@ -1043,6 +1121,7 @@ export default function ESP32Flasher() {
     try {
       setIsFlashing(true);
       setProgress(0);
+      setFlashResult(null);
       addLog('Starting flash process...');
 
       if (flashFullFirmware) {
@@ -1161,13 +1240,14 @@ export default function ESP32Flasher() {
         reportProgress: (fileIndex: number, written: number, total: number) => {
           const bytesDone = cumulativeBytes[fileIndex] + fileSizes[fileIndex] * (written / total);
           const overallFraction = totalBytes > 0 ? bytesDone / totalBytes : 0;
-          setProgress(Math.round(10 + overallFraction * 90));
+          setProgress(Math.round(10 + overallFraction * 89));
         }
       });
 
-      setProgress(100);
-      addLog('✓ Flash completed successfully!');
-      addLog('Finalizing flash process...');
+      // Writing is done at 99%; the last 1% is resetting the device
+      setProgress(99);
+      addLog('✓ Firmware written');
+      let resetSent = false;
 
       try {
         if (serialPortRef.current && 'setSignals' in serialPortRef.current) {
@@ -1178,6 +1258,7 @@ export default function ESP32Flasher() {
             await new Promise(resolve => setTimeout(resolve, 50));
             await port.setSignals({ dataTerminalReady: true, requestToSend: false });
             await new Promise(resolve => setTimeout(resolve, 50));
+            resetSent = true;
           } catch (signalError: unknown) {
             console.log('Signal error:', signalError);
           }
@@ -1205,6 +1286,14 @@ export default function ESP32Flasher() {
       serialPortRef.current = null;
       setIsConnected(false);
       setChipInfo('');
+
+      if (resetSent) {
+        setProgress(100);
+        setFlashResult('done');
+      } else {
+        setFlashResult('press-reset');
+        addLog('Warning: Could not reset the device automatically. Press its RESET button.');
+      }
 
       addLog('');
       addLog('✓ Firmware flash complete');
@@ -1498,7 +1587,7 @@ export default function ESP32Flasher() {
       // Check if it's a default firmware
       const isDefault = DEFAULT_FIRMWARES.some(f => f.name === name);
       if (isDefault) {
-        addLog(`Warning: Cannot delete default firmware: ${name}`);
+        addLog(`Warning: Cannot delete Chords firmware: ${name}`);
         return;
       }
 
@@ -1526,7 +1615,7 @@ export default function ESP32Flasher() {
     if (isFlashing) return;
 
     try {
-      if (confirm('Delete all firmwares you added? Default and GitHub firmwares are kept.')) {
+      if (confirm('Delete all firmwares you added? Chords and NPG Lite project firmwares are kept.')) {
         addLog('Clearing your firmwares...');
 
         // Only the user's own uploads - not defaults or saved GitHub projects
@@ -1640,14 +1729,15 @@ export default function ESP32Flasher() {
 
       <div className="flex-1 min-h-0 flex flex-col desk:flex-row gap-4">
         {/* Firmware sources: defaults + yours, and NPG Lite projects */}
-        <div className="firmware-selection flex flex-col desk:flex-row gap-4 flex-shrink-0 min-h-0">
-          {/* Column 1: default firmwares on top, your firmwares below */}
-          <aside className="w-full desk:w-[22rem] min-h-0 flex flex-col bg-neutral-900/60 rounded-xl border border-neutral-800">
-            <div className="flex-1 min-h-0 flex flex-col gap-6 p-5">
-            <section className="default-firmwares-section flex-shrink-0">
+        <div className="firmware-selection contents desk:flex desk:flex-row desk:gap-4 desk:flex-shrink-0 desk:min-h-0">
+          {/* Column 1: Chords firmwares on top, your firmwares below */}
+          <aside className="contents desk:flex desk:w-[22rem] desk:min-h-0 desk:flex-col desk:bg-neutral-900/60 desk:rounded-xl desk:border desk:border-neutral-800">
+            <div className="contents desk:flex desk:flex-1 desk:min-h-0 desk:flex-col desk:gap-6 desk:p-5">
+            <section className="default-firmwares-section order-2 desk:order-none flex-shrink-0 rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 desk:rounded-none desk:border-0 desk:bg-transparent desk:p-0">
               <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-1.5">
               <label className="block text-sm font-medium text-neutral-300">
-                Default firmwares
+                Chords firmwares
                 {prebuiltVersion && (
                   <span className="ml-2 text-xs text-neutral-500 font-normal">({prebuiltVersion})</span>
                 )}
@@ -1657,6 +1747,11 @@ export default function ESP32Flasher() {
                   </span>
                 )}
               </label>
+              <InfoButton label="Chords firmwares">
+                Three firmwares that work with Chords Web and Chords Python. Pick the one for how you want to connect:
+                Bluetooth, WiFi or USB. They always come from the latest Chords-Arduino-Firmware release.
+              </InfoButton>
+              </div>
                 <a
                   href={`https://github.com/${PREBUILT_FIRMWARE_REPO}/releases/latest`}
                   target="_blank"
@@ -1667,79 +1762,45 @@ export default function ESP32Flasher() {
                   <GithubMark className="h-4 w-4" />
                 </a>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                {/* ── BLE button ── */}
-                <button
-                  onClick={() => loadDefaultFirmware('ble')}
-                  disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'ble'}
-                  title="Wireless"
-                  className={`px-3 py-2.5 rounded-lg border transition-colors ${selectedDefaultFirmware === 'ble'
-                      ? 'bg-blue-500/15 border-blue-500/70 ring-1 ring-blue-500/30 cursor-default'
-                      : firmwareControlsDisabled
-                        ? 'bg-neutral-950/50 border-neutral-800 cursor-not-allowed opacity-50'
-                        : 'bg-neutral-950/50 border-neutral-800 hover:border-blue-500/50 hover:bg-blue-500/5'
-                    }`}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    {isLoadingDefaults ? (
-                      <Loader2 className="h-4 w-4 text-neutral-400 animate-spin" />
-                    ) : (
-                      <Bluetooth className="h-4 w-4 text-blue-400" />
-                    )}
-                    <span className="text-sm font-medium text-neutral-100">BLE</span>
-                  </div>
-                </button>
-
-                {/* ── WiFi button ── */}
-                <button
-                  onClick={() => loadDefaultFirmware('wifi')}
-                  disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'wifi'}
-                  title="Wireless"
-                  className={`px-3 py-2.5 rounded-lg border transition-colors ${selectedDefaultFirmware === 'wifi'
-                      ? 'bg-emerald-500/15 border-emerald-500/70 ring-1 ring-emerald-500/30 cursor-default'
-                      : firmwareControlsDisabled
-                        ? 'bg-neutral-950/50 border-neutral-800 cursor-not-allowed opacity-50'
-                        : 'bg-neutral-950/50 border-neutral-800 hover:border-emerald-500/50 hover:bg-emerald-500/5'
-                    }`}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    {isLoadingDefaults ? (
-                      <Loader2 className="h-4 w-4 text-neutral-400 animate-spin" />
-                    ) : (
-                      <Wifi className="h-4 w-4 text-emerald-400" />
-                    )}
-                    <span className="text-sm font-medium text-neutral-100">WiFi</span>
-                  </div>
-                </button>
-
-                {/* ── Serial button ── */}
-                <button
-                  onClick={() => loadDefaultFirmware('serial')}
-                  disabled={firmwareControlsDisabled || selectedDefaultFirmware === 'serial'}
-                  title="Direct USB"
-                  className={`px-3 py-2.5 rounded-lg border transition-colors ${selectedDefaultFirmware === 'serial'
-                      ? 'bg-violet-500/15 border-violet-500/70 ring-1 ring-violet-500/30 cursor-default'
-                      : firmwareControlsDisabled
-                        ? 'bg-neutral-950/50 border-neutral-800 cursor-not-allowed opacity-50'
-                        : 'bg-neutral-950/50 border-neutral-800 hover:border-violet-500/50 hover:bg-violet-500/5'
-                    }`}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    {isLoadingDefaults ? (
-                      <Loader2 className="h-4 w-4 text-neutral-400 animate-spin" />
-                    ) : (
-                      <Usb className="h-4 w-4 text-violet-400" />
-                    )}
-                    <span className="text-sm font-medium text-neutral-100">Serial</span>
-                  </div>
-                </button>
+              {/* Listed like the other firmwares, so they don't read as a mode switch */}
+              <div className="space-y-1">
+                {([
+                  { type: 'ble', name: 'Chords BLE', link: 'Bluetooth', Icon: Bluetooth, color: 'text-blue-400' },
+                  { type: 'wifi', name: 'Chords WiFi', link: 'WiFi', Icon: Wifi, color: 'text-emerald-400' },
+                  { type: 'serial', name: 'Chords Serial', link: 'USB', Icon: Usb, color: 'text-violet-400' },
+                ] as const).map(({ type, name, link, Icon, color }) => {
+                  const isSelected = selectedDefaultFirmware === type;
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => loadDefaultFirmware(type)}
+                      disabled={firmwareControlsDisabled || isSelected}
+                      className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors ${isSelected
+                        ? 'border-emerald-500/50 bg-emerald-500/10 cursor-default'
+                        : firmwareControlsDisabled
+                          ? 'border-neutral-800 bg-neutral-950/40 cursor-not-allowed opacity-50'
+                          : 'border-neutral-800 bg-neutral-950/40 hover:border-blue-500/40 hover:bg-blue-500/5'
+                        }`}
+                    >
+                      {isLoadingDefaults ? (
+                        <Loader2 className="h-4 w-4 flex-shrink-0 text-neutral-400 animate-spin" />
+                      ) : (
+                        <Icon className={`h-4 w-4 flex-shrink-0 ${color}`} />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{name}</span>
+                      <span className={`flex-shrink-0 text-xs ${isSelected ? 'text-emerald-400' : 'text-neutral-500'}`}>
+                        {isSelected ? 'Selected' : link}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
 
             {/* Firmwares the user added */}
             <section
               {...dropZone('list')}
-              className="local-firmwares-section relative h-[22rem] desk:h-auto desk:flex-1 desk:basis-0 min-h-0 flex flex-col border-t border-neutral-800 pt-5"
+              className="local-firmwares-section order-4 desk:order-none relative flex-none desk:flex-1 desk:basis-0 min-h-0 flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-5 desk:rounded-none desk:border-x-0 desk:border-b-0 desk:bg-transparent desk:p-0 desk:pt-5"
             >
               {dropTarget === 'list' && (
                 <div className="pointer-events-none absolute inset-0 top-2 z-10 flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-emerald-500/60 bg-neutral-950">
@@ -1750,6 +1811,10 @@ export default function ESP32Flasher() {
               <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <h2 className="whitespace-nowrap text-sm font-medium text-neutral-300">Your firmwares</h2>
+                  <InfoButton label="your firmwares">
+                    Your own .bin files. Add them with Add Firmware or by dragging them here, then click one to select
+                    it. They are saved only in this browser.
+                  </InfoButton>
                   {userFirmwares.length > 0 && (
                     <span className="px-1.5 py-0.5 border border-blue-500/30 bg-blue-500/10 text-blue-300 rounded-full text-[0.625rem] tabular-nums">
                       {userFirmwares.length}
@@ -1779,13 +1844,13 @@ export default function ESP32Flasher() {
               </div>
 
               {userFirmwares.length === 0 ? (
-                <div className="flex flex-1 min-h-0 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 p-4 text-center">
-                  <FileText className="h-8 w-8 text-neutral-700 mx-auto mb-2" strokeWidth={1.25} />
+                <div className="flex min-h-[8rem] desk:min-h-0 desk:flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 p-4 text-center">
+                  <FileText className="hidden desk:block h-8 w-8 text-neutral-700 mx-auto mb-2" strokeWidth={1.25} />
                   <p className="text-sm text-neutral-400">No firmwares added yet</p>
                   <p className="mt-1 text-xs text-neutral-500">Drag .bin files here or click Add Firmware. They&apos;re saved in this browser.</p>
                 </div>
               ) : (
-                <div className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+                <div className="space-y-1 flex-none h-[8rem] desk:h-auto desk:flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
                   {userFirmwares.map((firmware) => {
                     const isSelected = firmwareFile?.name === firmware.name;
                     const pick = () => {
@@ -1839,7 +1904,7 @@ export default function ESP32Flasher() {
             </div>
 
           {isFlashing && (
-            <div className="mx-5 mb-5 flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+            <div className="order-5 desk:order-none desk:mx-5 desk:mb-5 flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg">
               <Loader2 className="h-4 w-4 text-amber-300 animate-spin flex-shrink-0" />
               <p className="text-amber-200 text-xs font-medium">
                 Firmware selection locked during flashing
@@ -1849,11 +1914,17 @@ export default function ESP32Flasher() {
           </aside>
 
           {/* Column 2: NPG Lite projects, full height */}
-          <aside className="w-full desk:w-[20rem] min-h-0 flex flex-col bg-neutral-900/60 rounded-xl border border-neutral-800 p-5">
+          <aside className="order-3 desk:order-none flex-none w-full desk:w-[20rem] min-h-0 flex flex-col bg-neutral-900/60 rounded-xl border border-neutral-800 p-5">
             {/* NPG Lite projects from the GitHub release */}
-            <section className="github-firmware-btn h-[26rem] desk:h-auto desk:flex-1 min-h-0 flex flex-col">
+            <section className="github-firmware-btn desk:flex-1 min-h-0 flex flex-col">
               <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-3">
-                <h2 className="min-w-0 truncate text-sm font-medium text-neutral-300">NPG Lite projects</h2>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <h2 className="min-w-0 truncate text-sm font-medium text-neutral-300">NPG Lite projects</h2>
+                  <InfoButton label="NPG Lite projects">
+                    Ready-made projects from the latest NPG-Lite-Arduino-Firmware release. Click one to download and
+                    select it, or use the download icon to save them all. Downloaded projects stay in this browser.
+                  </InfoButton>
+                </div>
                 <div className="flex flex-shrink-0 items-center gap-0.5">
                   <a
                     href={`https://github.com/${githubRepo}/releases/latest`}
@@ -1888,7 +1959,7 @@ export default function ESP32Flasher() {
               </div>
 
               {githubFirmwares.length === 0 ? (
-                <div className="flex flex-1 min-h-0 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 p-4 text-center">
+                <div className="flex min-h-[7.75rem] desk:min-h-0 desk:flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 p-4 text-center">
                   {isFetchingGithub ? (
                     <p className="flex items-center justify-center gap-2 text-sm text-neutral-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1908,7 +1979,7 @@ export default function ESP32Flasher() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
+                <div className="space-y-1 flex-none h-[7.75rem] desk:h-auto desk:flex-1 min-h-0 overflow-y-auto pr-1 custom-scrollbar">
                   {githubFirmwares.map((firmware) => {
                     const fileName = mergedFileName(firmware.name);
                     const isDownloading = downloadingFirmware === firmware.name;
@@ -2021,9 +2092,15 @@ export default function ESP32Flasher() {
         </div>
 
         {/* Right: flashing on top, console below */}
-        <main className="flex-1 min-w-0 min-h-0 flex flex-col gap-4">
-          <section className="flash-panel desk:overflow-y-auto desk:flex-none custom-scrollbar bg-neutral-900/60 rounded-xl border border-neutral-800 p-5 space-y-3">
-            <h2 className="text-base font-semibold text-neutral-100">Flash Firmware</h2>
+        <main className="contents desk:flex desk:flex-1 desk:min-w-0 desk:min-h-0 desk:flex-col desk:gap-4">
+          <section className="flash-panel order-1 desk:order-none flex-none desk:overflow-y-auto desk:flex-none custom-scrollbar bg-neutral-900/60 rounded-xl border border-neutral-800 p-5 space-y-3">
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-base font-semibold text-neutral-100">Flash Firmware</h2>
+              <InfoButton label="flashing firmware">
+                Connect your device, select a firmware, then click Flash Firmware. Keep the device plugged in until it
+                reaches 100%.
+              </InfoButton>
+            </div>
             {/* Selected Firmware Display (this is the App file - required in both modes) */}
             <div className="selected-firmware-display">
               {firmwareFile ? (
@@ -2054,12 +2131,12 @@ export default function ESP32Flasher() {
               ) : (
                 <div className="h-[5.25rem] flex flex-col items-center justify-center px-4 bg-neutral-950/50 rounded-lg border border-dashed border-neutral-700 text-center">
                   <p className="text-sm text-neutral-400">No firmware selected</p>
-                  <p className="mt-1 text-xs text-neutral-500">Pick a default firmware, an NPG Lite project or one of your own.</p>
+                  <p className="mt-1 text-xs text-neutral-500">Pick a Chords firmware, an NPG Lite project or one of your own.</p>
                 </div>
               )}
             </div>
 
-            <div className="full-flash-option flex items-start gap-3 px-4 py-3 min-h-[8.5rem] sm:min-h-[6.25rem] desk:min-h-0 desk:h-[5.5rem] desk:overflow-hidden bg-neutral-950/50 rounded-lg border border-neutral-800">
+            <div className="full-flash-option flex items-start gap-3 px-4 py-3 min-h-[8.5rem] sm:min-h-[6.25rem] desk:min-h-0 desk:h-[6.25rem] desk:overflow-hidden bg-neutral-950/50 rounded-lg border border-neutral-800">
               <div className="relative flex items-center mt-0.5">
                 <input
                   type="checkbox"
@@ -2149,7 +2226,9 @@ export default function ESP32Flasher() {
               {showAdvanced && !isFlashing && !flashFullFirmware && advancedPopupPos && (() => {
                 const detected = firmwareFile ? detectAddressForFilename(firmwareFile.name) : null;
                 const recommended = detected?.address ?? '0x10000';
-                const isRecommended = flashAddress.trim().toLowerCase() === recommended.toLowerCase();
+                // A merged image only works at 0x0, so its address can't be edited
+                const isLocked = detected?.kind === 'merged';
+                const isRecommended = isLocked || flashAddress.trim().toLowerCase() === recommended.toLowerCase();
                 return (
                   <div
                     className="advanced-popup fixed z-50 w-[22rem] overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
@@ -2175,25 +2254,32 @@ export default function ESP32Flasher() {
                           <input
                             id="flashAddressInput"
                             type="text"
-                            value={flashAddress}
+                            value={isLocked ? recommended : flashAddress}
                             onChange={(e) => setFlashAddress(e.target.value)}
                             onBlur={handleFlashAddressBlur}
                             placeholder="0x10000"
                             spellCheck={false}
-                            className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm text-neutral-100 focus:outline-none ${isRecommended
+                            className={`min-w-0 flex-1 rounded-lg border bg-neutral-950 px-3 py-2 font-mono text-sm focus:outline-none disabled:cursor-not-allowed disabled:text-neutral-500 ${isLocked ? 'border-neutral-800' : 'text-neutral-100'} ${isRecommended
                               ? 'border-neutral-700 focus:border-blue-500'
                               : 'border-amber-500/50 focus:border-amber-400'
                               }`}
-                            disabled={isFlashing}
+                            disabled={isFlashing || isLocked}
                           />
-                          <button
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => setFlashAddress(recommended)}
-                            disabled={isRecommended}
-                            className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
-                          >
-                            Reset
-                          </button>
+                          {isLocked ? (
+                            <span className="flex flex-shrink-0 items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-2 text-xs font-medium text-neutral-500">
+                              <Lock className="h-3.5 w-3.5" />
+                              Locked
+                            </span>
+                          ) : (
+                            <button
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => setFlashAddress(recommended)}
+                              disabled={isRecommended}
+                              className="flex-shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-neutral-800 disabled:cursor-default disabled:opacity-40 transition-colors"
+                            >
+                              Reset
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -2209,13 +2295,17 @@ export default function ESP32Flasher() {
                         </span>
                       </div>
 
-                      <p className="flex gap-2 text-xs leading-relaxed text-neutral-500">
-                        <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-400/80" />
-                        <span>
-                          A wrong address can stop the device from booting. Below 0x9000 is blocked except for merged
-                          images; use Flash Complete Firmware for the bootloader and partition table.
-                        </span>
-                      </p>
+                      {isLocked ? (
+                        <p className="text-xs leading-relaxed text-neutral-400">
+                          This address can&apos;t be changed. A merged image contains the bootloader, partition table and
+                          app, so it must be written from 0x0.
+                        </p>
+                      ) : (
+                        <p className="text-xs leading-relaxed text-red-400">
+                          This is an advanced option. Change it only if you know what you&apos;re doing. A wrong address
+                          can stop the device from booting.
+                        </p>
+                      )}
                     </div>
                   </div>
                 );
@@ -2235,32 +2325,44 @@ export default function ESP32Flasher() {
               className="flash-button relative min-w-0 flex-1 overflow-hidden px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-semibold shadow-sm transition-colors"
             >
               {/* Progress fills the button while flashing */}
-              {isFlashing && (
+              {(isFlashing || flashResult) && (
                 <span
                   className="progress-section absolute inset-y-0 left-0 bg-emerald-500/40 transition-all duration-300"
                   style={{ width: `${progress}%` }}
                 />
               )}
-              <span className={`relative block truncate whitespace-nowrap ${isFlashing ? 'text-neutral-100 tabular-nums' : ''}`}>
-                {isFlashing ? `Flashing... ${progress}%` : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware'}
+              <span className={`relative block truncate whitespace-nowrap ${isFlashing || flashResult ? 'text-neutral-100 tabular-nums' : ''}`}>
+                {isFlashing
+                  ? (progress >= 99 ? 'Resetting device... 99%' : `Flashing... ${progress}%`)
+                  : flashResult === 'done'
+                    ? 'Flash complete 100%'
+                    : flashResult === 'press-reset'
+                      ? 'Press RESET on the device 99%'
+                      : flashFullFirmware ? 'Flash Complete Firmware' : 'Flash Firmware'}
               </span>
             </button>
             </div>
           </section>
 
           <section
-          className="console-section relative h-[28rem] desk:h-auto desk:flex-1 desk:min-h-0 flex flex-col bg-neutral-900/60 rounded-xl "
+          className="console-section order-6 desk:order-none flex-none relative h-[28rem] desk:h-auto desk:flex-1 desk:min-h-0 flex flex-col bg-neutral-900/60 rounded-xl "
           >
             {/* Clear, pinned to the console's top-right corner */}
+            <div className="absolute right-3 top-2.5 z-10 flex items-center gap-1.5">
+            <InfoButton label="the console">
+              Shows each step of connecting and flashing. Successful steps are green, warnings are amber and errors are
+              red.
+            </InfoButton>
             <button
               onClick={clearLogs}
               disabled={logs.length === 0}
               title="Clear console"
-              className="absolute right-3 top-2.5 z-10 rounded-md border border-neutral-700 bg-neutral-900/90 px-2.5 py-1 text-xs font-medium text-neutral-300 backdrop-blur hover:bg-neutral-800 hover:text-neutral-100 disabled:cursor-default disabled:opacity-40 transition-colors"
+              className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2.5 py-1 text-xs font-medium text-neutral-300 backdrop-blur hover:bg-neutral-800 hover:text-neutral-100 disabled:cursor-default disabled:opacity-40 transition-colors"
             >
               Clear
             </button>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 pr-20 flex-1 overflow-y-auto font-mono text-xs leading-relaxed break-words min-h-0 custom-scrollbar">
+            </div>
+            <div className="bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 pr-24 flex-1 overflow-y-auto font-mono text-xs leading-relaxed break-words min-h-0 custom-scrollbar">
               {logs.map((log, index) => (
                 <div
                   key={index}

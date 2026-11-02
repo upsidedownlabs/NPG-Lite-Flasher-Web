@@ -8,7 +8,7 @@ Flash firmware to your Neuro PlayGround (NPG) Lite straight from the browser. No
 
 ## Features
 
-- **Default firmwares:** the BLE, WiFi and Serial builds of [Chords](https://github.com/upsidedownlabs/Chords-Arduino-Firmware), always taken from the latest release.
+- **Chords firmwares:** the BLE, WiFi and Serial builds of [Chords](https://github.com/upsidedownlabs/Chords-Arduino-Firmware), always taken from the latest release.
 - **NPG Lite projects:** every project from the latest [NPG-Lite-Arduino-Firmware](https://github.com/upsidedownlabs/NPG-Lite-Arduino-Firmware) release, each with a short description of what it does. Download one, or all of them at once.
 - **Your own firmware:** add any `.bin` file with the Add Firmware button or by dragging it onto the page.
 - **Saved in the browser:** downloaded and added firmwares are stored locally, so they're ready the next time you open the flasher.
@@ -36,7 +36,7 @@ The page must be opened over HTTPS (as on the link above) or from `localhost`.
 1. Connect the NPG Lite to your computer with a USB cable.
 2. Click **Connect Device** and choose the board's serial port in the browser's pop-up.
 3. Pick a firmware from one of the lists on the left:
-   - **Default firmwares:** BLE, WiFi or Serial.
+   - **Chords firmwares:** Chords BLE, Chords WiFi or Chords Serial.
    - **NPG Lite projects:** click a project to download and select it.
    - **Your firmwares:** a file you added yourself.
 4. Click **Flash Firmware** and wait for it to reach 100%. Don't unplug the board while it's flashing.
@@ -51,7 +51,7 @@ ESP32 firmware comes in two forms:
 | `*.merged.bin` | Bootloader, partition table and app in one file | `0x0` |
 | `*.ino.bin` | The app only | `0x10000` |
 
-All default firmwares and NPG Lite projects are merged images, so they're flashed as a single file.
+All Chords firmwares and NPG Lite projects are merged images, so they're flashed as a single file.
 
 If you flash an app-only file, the board keeps its existing bootloader and partition table. That's fine when the firmware already on the board uses the same partition scheme. For a blank chip, or when the partition scheme changes, turn on **Flash Complete Firmware** and choose all three files:
 

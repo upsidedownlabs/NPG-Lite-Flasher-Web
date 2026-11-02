@@ -20,15 +20,23 @@
  * layout always fits: whichever of width and height is tighter decides, and
  * text and panels grow or shrink together.
  *
- * Smaller windows (where that would make text too small to read): normal 16px
- * text, panels stacked in one column, and the page scrolls. The `desk:`
- * variant below marks the classes that apply only to the large layout.
+ * Narrow or portrait windows (half a screen, phones): normal 16px text, panels
+ * stacked in one column, and the page scrolls. Landscape windows, like scaled
+ * laptops, stay on one screen. The `desk:` variant below marks the classes that
+ * apply only to the one-screen layout.
  */
-@custom-variant desk (@media (min-width: 1200px) and (min-height: 600px));
+@custom-variant desk {
+  @media (min-width: 1200px) and (min-height: 340px), (min-width: 800px) and (min-height: 340px) and (min-aspect-ratio: 4/3) {
+    @slot;
+  }
+}
 
-@media (min-width: 1200px) and (min-height: 600px) {
+@media (min-width: 1200px) and (min-height: 340px), (min-width: 800px) and (min-height: 340px) and (min-aspect-ratio: 4/3) {
   html {
-    font-size: min(1vw, 100dvh / 50);
+    /* Normally a 100rem x 50rem canvas. Scaled laptops have small windows, so
+       up to 12px the layout may tighten to its real minimum of 85rem x 36rem
+       to keep text readable while everything still fits on one screen. */
+    font-size: max(min(1vw, 100dvh / 50), min(100vw / 85, 100dvh / 36, 12px));
   }
 }
 
