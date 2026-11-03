@@ -8,14 +8,16 @@ Flash firmware to your Neuro PlayGround (NPG) Lite straight from the browser. No
 
 ## Features
 
-- **Default firmwares:** the BLE, WiFi and Serial builds of [Chords](https://github.com/upsidedownlabs/Chords-Arduino-Firmware), always taken from the latest release.
+- **Chords firmwares:** the BLE, WiFi and Serial builds of [Chords](https://github.com/upsidedownlabs/Chords-Arduino-Firmware), always taken from the latest release.
 - **NPG Lite projects:** every project from the latest [NPG-Lite-Arduino-Firmware](https://github.com/upsidedownlabs/NPG-Lite-Arduino-Firmware) release, each with a short description of what it does. Download one, or all of them at once.
 - **Your own firmware:** add any `.bin` file with the Add Firmware button or by dragging it onto the page.
 - **Saved in the browser:** downloaded and added firmwares are stored locally, so they're ready the next time you open the flasher.
 - **Automatic flash address:** merged images go to `0x0` and app-only files to `0x10000`, so you don't have to remember offsets.
 - **Flash Complete Firmware:** write the bootloader, partition table and app together, for a blank chip or a new partition scheme.
 - **Live console** that shows every step of connecting and flashing.
-- **Guided tour** that walks you through the page.
+- **Help on every section:** hover over or click the **i** button next to a section's title for a short explanation.
+- **Guided tour:** the **Guide** button in the navbar walks you through the page.
+- **Works on small screens:** in a narrow or short window, the panels stack in one column and flashing moves to a bar at the bottom of the screen.
 
 ## Requirements
 
@@ -27,7 +29,6 @@ Flash firmware to your Neuro PlayGround (NPG) Lite straight from the browser. No
 | Chrome, Edge, Opera | Yes |
 | Firefox | Yes, from version 151 |
 | Safari | No |
-| Mobile browsers | No |
 
 The page must be opened over HTTPS (as on the link above) or from `localhost`.
 
@@ -35,11 +36,11 @@ The page must be opened over HTTPS (as on the link above) or from `localhost`.
 
 1. Connect the NPG Lite to your computer with a USB cable.
 2. Click **Connect Device** and choose the board's serial port in the browser's pop-up.
-3. Pick a firmware from one of the lists on the left:
-   - **Default firmwares:** BLE, WiFi or Serial.
+3. Pick a firmware from one of the lists:
+   - **Chords firmwares:** Chords BLE, Chords WiFi or Chords Serial.
    - **NPG Lite projects:** click a project to download and select it.
    - **Your firmwares:** a file you added yourself.
-4. Click **Flash Firmware** and wait for it to reach 100%. Don't unplug the board while it's flashing.
+4. Click **Flash Firmware** (**Flash** in the bar at the bottom on small screens) and wait for it to reach 100%. Don't unplug the board while it's flashing.
 5. If the board doesn't start the new firmware on its own, press its RESET button, or unplug and replug the USB cable.
 
 ## Merged images and Flash Complete Firmware
@@ -51,7 +52,7 @@ ESP32 firmware comes in two forms:
 | `*.merged.bin` | Bootloader, partition table and app in one file | `0x0` |
 | `*.ino.bin` | The app only | `0x10000` |
 
-All default firmwares and NPG Lite projects are merged images, so they're flashed as a single file.
+All Chords firmwares and NPG Lite projects are merged images, so they're flashed as a single file.
 
 If you flash an app-only file, the board keeps its existing bootloader and partition table. That's fine when the firmware already on the board uses the same partition scheme. For a blank chip, or when the partition scheme changes, turn on **Flash Complete Firmware** and choose all three files:
 
@@ -63,7 +64,8 @@ If you flash an app-only file, the board keeps its existing bootloader and parti
 
 In Arduino IDE, **Sketch > Export Compiled Binary** creates these files in the sketch's `build` folder.
 
-**Advanced Options** lets you change the flash address of a single file. Only do this if you know the address your file needs: a wrong address can stop the board from booting.
+**Advanced Options** opens a dialog where you can change the flash address of a single file. Only do this if you know the address your file needs: a wrong address can stop the board from booting. The address of a merged image is locked at `0x0`, and Advanced Options isn't available while Flash Complete Firmware is on.
+
 
 ## Troubleshooting
 

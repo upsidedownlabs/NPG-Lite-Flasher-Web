@@ -14,7 +14,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   useEffect(() => {
     const tourSteps: DriveStep[] = [
       {
-        element: '.connection-section',
+        element: '.connect-button',
         popover: {
           title: 'Device connection',
           description: 'Start by connecting your NPG Lite device. Click "Connect Device" and select the correct COM port when prompted.',
@@ -26,7 +26,7 @@ export function AppTour({ autoStart = false }: AppTourProps) {
         element: '.firmware-selection',
         popover: {
           title: 'Firmware sources',
-          description: 'Every firmware you can flash is listed here: the default builds, NPG Lite projects from GitHub, and files you add yourself. Click one to select it.',
+          description: 'Every firmware you can flash is listed here: the Chords firmwares, NPG Lite projects from GitHub, and files you add yourself. Click one to select it.',
           side: 'right' as const,
           align: 'start' as const,
         },
@@ -34,8 +34,8 @@ export function AppTour({ autoStart = false }: AppTourProps) {
       {
         element: '.default-firmwares-section',
         popover: {
-          title: 'Default firmwares',
-          description: 'The standard BLE, WiFi and Serial builds, downloaded from the latest Chords-Arduino-Firmware release and kept up to date automatically.',
+          title: 'Chords firmwares',
+          description: 'Three firmwares for Chords Web and Chords Python: Chords BLE, Chords WiFi and Chords Serial. Pick the one for how you want to connect. They come from the latest Chords-Arduino-Firmware release and stay up to date automatically.',
           side: 'right' as const,
           align: 'start' as const,
         },
@@ -156,17 +156,14 @@ export function AppTour({ autoStart = false }: AppTourProps) {
   };
 
   return (
-    <div className="fixed bottom-2 right-6 z-40 flex flex-col gap-2">
-      <button
-        onClick={startTour}
-        className="flex items-center gap-2 rounded-full border border-blue-500/40 bg-blue-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-blue-900/40 backdrop-blur transition-colors hover:bg-blue-500"
-        title="Start Guided Tour"
-      >
-        <Compass className="h-4 w-4" />
-        <span>Guide</span>
-      </button>
-      
- 
-    </div>
+    <button
+      onClick={startTour}
+      title="Start Guided Tour"
+      aria-label="Start Guided Tour"
+      className="flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 p-1.5 desk:px-3 desk:py-1.5 text-sm font-medium text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-blue-200"
+    >
+      <Compass className="h-4 w-4" />
+      <span className="hidden desk:inline">Guide</span>
+    </button>
   );
 }
