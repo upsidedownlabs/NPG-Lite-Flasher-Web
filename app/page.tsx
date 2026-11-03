@@ -1801,8 +1801,8 @@ export default function ESP32Flasher() {
             <section className="default-firmwares-section order-2 desk:order-none flex-shrink-0 rounded-xl border border-blue-400/50 bg-neutral-900/60 p-5 desk:rounded-none desk:border-0 desk:bg-transparent desk:p-0">
               <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-1.5">
-              <label className="block text-sm font-medium text-neutral-300">
-                Chords firmwares
+              <label className="block text-sm font-medium font-semibold text-neutral-300">
+                Chords Firmwares
                 {prebuiltVersion && (
                   <span className="ml-2 text-xs text-neutral-500 font-normal">({prebuiltVersion})</span>
                 )}
@@ -1813,7 +1813,16 @@ export default function ESP32Flasher() {
                 )}
               </label>
               <InfoButton label="Chords firmwares">
-                Three firmwares that work with Chords Web and Chords Python. Pick the one for how you want to connect:
+                Three firmwares that work with{' '}
+                <a
+                  href="https://chords.upsidedownlabs.tech/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+                >
+                  Chords Web
+                </a>
+                {' '}and Chords Python. Pick the one for how you want to connect:
                 Bluetooth, WiFi or USB. They always come from the latest Chords-Arduino-Firmware release.
               </InfoButton>
               </div>
@@ -1875,7 +1884,7 @@ export default function ESP32Flasher() {
               )}
               <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <h2 className="whitespace-nowrap text-sm font-medium text-neutral-300">Your firmwares</h2>
+                  <h2 className="whitespace-nowrap text-sm font-medium font-semibold text-neutral-300">Your Firmwares</h2>
                   <InfoButton label="your firmwares">
                     Your own .bin files. Add them with Add Firmware or by dragging them here, then click one to select
                     it. They are saved only in this browser.
@@ -1985,7 +1994,7 @@ export default function ESP32Flasher() {
             <section className="github-firmware-btn desk:flex-1 min-h-0 flex flex-col">
               <div className="mb-2 flex flex-shrink-0 items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <h2 className="min-w-0 truncate text-sm font-medium text-neutral-300">NPG Lite projects</h2>
+                  <h2 className="min-w-0 truncate text-sm font-medium font-semibold text-neutral-300">NPG Lite Projects</h2>
                   <InfoButton label="NPG Lite projects">
                     Ready-made projects from the latest NPG-Lite-Arduino-Firmware release. Click one to download and
                     select it, or use the download icon to save them all. Downloaded projects stay in this browser.
